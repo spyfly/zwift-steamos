@@ -327,12 +327,54 @@ fi
 APPID_ONLINE="$($SUDO python3 -c "import binascii,sys; exe=sys.argv[1]; print((binascii.crc32(exe.encode()+'Zwift'.encode()) & 0xFFFFFFFF) | 0x80000000)" "$GAME_DIR/LinuxZwiftLauncher.exe")"
 grep -q '^APPID=' "$CONF" || echo "APPID=\"$APPID_ONLINE\"" >> "$CONF"
 
+# --- second entry: "Zwift (Settings)" — Zluggish web UI in the launcher webview
+# (rider/user selection, account stuff). The game start stays launcherless and
+# reads its persisted token on its own.
+if [ "$MAKE_SHORTCUT" = 1 ]; then
+    [ -f "$GAME_DIR/LinuxZwiftSettings.exe" ] || cp "$GAME_DIR/LinuxZwiftLauncher.exe" "$GAME_DIR/LinuxZwiftSettings.exe" 2>/dev/null || true
+    if [ -f "$GAME_DIR/LinuxZwiftSettings.exe" ]; then
+        $SUDO python3 "$HERE/share/steam-integration.py" \
+            --exe "$GAME_DIR/LinuxZwiftSettings.exe" --app-name "Zwift (Settings)" \
+            --startdir "$GAME_DIR" --icon "$ICON" \
+            --launch-options "ZWIFT_STEAMOS_DATA=$DATA $BIN_DIR/zwift-settings" \
+            --description "Zwift rider/user settings (Zluggish web UI)"
+    fi
+    # library artwork for both entries into every Steam userdata grid dir
+    if [ -d "$HERE/icons/icons" ]; then
+        for ud in "$TARGET_HOME"/.local/share/Steam/userdata/*/; do
+            [ -d "$ud" ] || continue
+            mkdir -p "$ud/config/grid" 2>/dev/null || $SUDO mkdir -p "$ud/config/grid"
+            cp -f "$HERE"/icons/icons/*.png "$ud/config/grid/" 2>/dev/null \
+                || $SUDO cp -f "$HERE"/icons/icons/*.png "$ud/config/grid/"
+        done
+        [ "$AS_ROOT" = 1 ] && $SUDO chown -R "$TARGET_USER:$TARGET_USER" "$TARGET_HOME"/.local/share/Steam/userdata/*/config/grid 2>/dev/null || true
+    else
+        warn "grid icons missing from the package - library artwork skipped"
+    fi
+fi
+
 # ----------------------------------------------------------------------------- 5/6 game files
 say "5/6 Downloading/verifying the game files (~5 GB) into $GAME_DIR"
 ( cd "$DATA" && $SUDO python3 zwift-fetch-game.py "$GAME_DIR" ) || die "game download failed - run it again: zwift update"
 # launcher version file (LAUNCHER_VERSION fallback in the pre-launch wrapper)
 curl -fsSL -o "$GAME_DIR/ZwiftLauncher_ver_cur.xml" "https://cdn.zwift.com/gameassets/Zwift_Updates_Root/ZwiftLauncher_ver_cur.xml" 2>/dev/null \
     || warn "could not fetch ZwiftLauncher_ver_cur.xml (using built-in launcher version)"
+
+# --- optional: official Zwift launcher (WebView2 UI) into the Wine prefix.
+# Fallback for 'Zwift (Settings)'; the webview shortcut is the default settings app.
+PROTON_BIN="$COMPAT_DIR/$GE_ZWIFT/proton"
+if [ -f "$GAME_DIR/ZwiftSetup.exe" ] && [ -x "$PROTON_BIN" ] && [ "$MAKE_SHORTCUT" = 1 ]; then
+    say "Installing the official Zwift launcher into the Wine prefix (optional fallback)"
+    PFX_ROOT="$TARGET_HOME/.local/share/Steam/steamapps/compatdata/$APPID_ONLINE"
+    if ( cd "$GAME_DIR" && $SUDO env STEAM_COMPAT_DATA_PATH="$PFX_ROOT" \
+            STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT:-$TARGET_HOME/.local/share/Steam}" \
+            HOME="$TARGET_HOME" timeout 300 python3 "$PROTON_BIN" runinprefix \
+            ZwiftSetup.exe /VERYSILENT /NORESTART /SUPPRESSMSGBOXES >/dev/null 2>&1 ); then
+        say "  official launcher installed (ZwiftLauncher.exe in the prefix)"
+    else
+        warn "official launcher install failed - optional; webview settings app still works"
+    fi
+fi
 
 # ----------------------------------------------------------------------------- 6/6 ownership + restart
 if [ "$AS_ROOT" = 1 ]; then
@@ -355,6 +397,7 @@ fi
 
 say "Done."
 say "  1. Sign in once:        zwift login        (as $TARGET_USER, Desktop Mode recommended)"
-say "  2. Start Zwift:         Steam library -> Zwift"
+say "  2. Start Zwift:         Steam library -> Zwift      (launcherless, persisted token)"
+say "  Rider/user settings:    Steam library -> Zwift (Settings)  (webview, Zluggish UI)"
 say "  Offline mode:           zwift zluggish --host <ip> --cert <pem>  (zluggish off switches back)"
 say "  Status / diagnostics:   zwift status | zwift doctor"

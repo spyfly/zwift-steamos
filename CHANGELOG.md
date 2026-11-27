@@ -122,3 +122,19 @@
   (the sign-in form can sit still for minutes).
 - deploy note: flatpak install MUST run as the deck user (as root it lands in
   /root/.local/share/flatpak and deck's store keeps serving the old build).
+
+## 2026-11-27 - settings app + icons (era 13)
+- game start is launcherless: silent token-only prelaunch (ZWIFT_LOGIN_UI=1
+  forces the window back); missing token exits 102 with a pointer to the
+  settings app.
+- second Steam shortcut "Zwift (Settings)" (appid 2566064630): chromium webview
+  on the Zluggish web UI (rider/user selection, account pages) via the
+  persistent profile + remember-cookie; bin/zwift-settings.
+- official ZwiftLauncher.exe installed into the wine prefix via ZwiftSetup.exe
+  /VERYSILENT (runs under GE-Proton; needs to be a Steam child for gamescope);
+  kept as optional fallback, not wired as a shortcut.
+- icons/gen_icons.py: deterministic PIL artwork for both entries in all Steam
+  sizes (920x430, 600x900, 1920x620, 512x512 grid naming <id>.png / <id>p.png /
+  <id>_hero.png / <id>_icon.png); installed.sh deploys them to every userdata
+  grid dir. Map/world choice remains the in-game picker (Zluggish web UI has no
+  world route).
