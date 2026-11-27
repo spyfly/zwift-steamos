@@ -159,7 +159,11 @@ def _devtools_port(proc, deadline=20.0):
             continue
         if "DevTools listening" in line:
             ws = line.split("DevTools listening on ")[1].strip()
-            return urllib.parse.urlsplit(ws).port, ws
+            port = urllib.parse.urlsplit(ws).port
+            if os.environ.get("ZWIFT_LAUNCHER_DEBUG"):
+                sys.stderr.write(f"zwift-launcher: debug port={port} "
+                                 f"alive={proc.poll() is None}\n")
+            return port, ws
         sys.stderr.write("zwift-launcher: chromium: " + line)
     raise RuntimeError("no DevTools endpoint from chromium (timeout)")
 
@@ -266,6 +270,10 @@ def ask_code_chromium(url, timeout=None):
     code = None
     error = None
     proc = None
+    if os.environ.get("ZWIFT_LAUNCHER_DEBUG"):
+        sys.stderr.write(f"zwift-launcher: debug cmd: {args}\n")
+        sys.stderr.write(f"zwift-launcher: debug env keys: {sorted(env)}\n")
+        sys.stderr.write(f"zwift-launcher: debug spki: {[a for a in args if a.startswith('--ignore-certificate') ] or 'NONE'}\n")
 
     def _kill_tree():
         # chromium runs under the flatpak's bwrap: killing the wrapper alone orphans
