@@ -264,6 +264,7 @@ def ask_code_chromium(url, timeout=None):
                 subprocess.run(["pkill", "-f", "user-data-dir=" + profile],
                                timeout=10, check=False)
                 time.sleep(2)
+        assert proc is not None and port is not None, "chromium never started"
         target = _page_target(port)
         sock = _ws_connect(target)
         global WS
