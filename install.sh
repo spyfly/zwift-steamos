@@ -99,6 +99,7 @@ install -m 755 "$HERE/share/steam-prelaunch.sh"        "$BIN_DIR/steam-prelaunch
 install -m 755 "$HERE/share/zwift-cli.sh"              "$BIN_DIR/zwift"
 install -m 755 "$HERE/share/zwift-doctor.sh"           "$BIN_DIR/zwift-doctor"
 install -m 644 "$HERE/share/zwift-auth.py"             "$DATA/zwift-auth.py"
+install -m 644 "$HERE/share/zwift-launcher.py"         "$DATA/zwift-launcher.py"
 install -m 644 "$HERE/share/zwift-fetch-game.py"       "$DATA/zwift-fetch-game.py"
 mkdir -p "$DATA/vdf"
 cp -f "$HERE/share/vdf/__init__.py" "$HERE/share/vdf/vdict.py" "$DATA/vdf/"
