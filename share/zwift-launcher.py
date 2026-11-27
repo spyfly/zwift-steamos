@@ -206,6 +206,17 @@ def _ws_call(sock, mid, method, params=None):
         sock.settimeout(None)
 
 
+def _headless_signin(env):
+    """True when no compositor can show the window (SteamOS game mode runs
+    gamescope without a wayland socket; foreign windows stay invisible there).
+    Desktop mode has a wayland socket -> the launcher window is visible and the
+    user clicks the rider themselves."""
+    wd = env.get("WAYLAND_DISPLAY")
+    if not wd:
+        return True
+    return not os.path.exists(os.path.join(env.get("XDG_RUNTIME_DIR", "/run/user/1000"), wd))
+
+
 def _import_remember_cookies(sock):
     """Seed Zluggish's remember-me cookie(s) from remember-cookies.json into the
     chromium profile via CDP. The realm renews the cookie on every rider login,
@@ -393,11 +404,12 @@ def ask_code_chromium(url, timeout=None):
         # single button click as sign-in, so the launcher can do it headlessly -
         # needed on Big Picture/gamescope where the window is never visible.
         rider_clicks = 0
-        if _cookie_count:
+        env_now = _clean_env()
+        if _cookie_count and _headless_signin(env_now):
             next_click = time.time() + 2.5
             sock.settimeout(2.5)  # wake the read loop for the click timer
         else:
-            next_click = time.time() * 2  # never
+            next_click = time.time() * 2  # window is visible - user clicks
         deadline = time.time() + timeout
         while time.time() < deadline:
             if time.time() >= next_click and rider_clicks < 12:
