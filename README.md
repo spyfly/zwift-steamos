@@ -8,6 +8,34 @@ Run the official **Zwift for Windows** app on Linux, with your **Bluetooth and A
 > **November 2026: heart-rate monitors fixed.** A Bluetooth heart-rate sensor could show as connected in Zwift but never send a pulse, showing "no signal". Wine's request to switch on heart-rate notifications sometimes failed, and Zwift doesn't ask again. `zwift` now keeps that subscription open, and Wine's Bluetooth driver retries the request. On the test PC heart rate then held through a 68-minute ride, and Zwift reconnected on its own after short drops. Re-run `./install.sh` to get the fix. `zwift` now also remembers the window's size and position.
 
 
+## SteamOS: Steam Machine / Steam Deck (zwift-steamos)
+
+This fork runs Zwift from the **Steam UI** with **GE-Proton as a Steam compatibility tool** —
+no umu-launcher, Steam owns the launch and the wine prefix. Install the flatpak bundle and
+click the app icon once; the first run performs the whole setup (GE-Proton into Steam's
+`compatibilitytools.d`, ~5 GB game download into `~/.local/share/zwift-steamos/game`, Steam
+library shortcuts "Zwift" and — with a Zluggish server — "Zwift (Zluggish)"):
+
+```bash
+flatpak install --user https://github.com/spyfly/zwift-steamos/releases/download/v1.0.0/zwift-steamos-1.0.0.flatpak
+flatpak run io.github.spyfly.zwift-steamos          # first run = full setup
+```
+
+Zluggish offline server (own private server that answers the Zwift client's requests on your
+LAN) — either during the first run, or any time later without reinstalling:
+
+```bash
+flatpak run io.github.spyfly.zwift-steamos install --zluggish-host 192.168.30.240 --zluggish-cert server.pem
+flatpak run io.github.spyfly.zwift-steamos zluggish --host 192.168.30.240 --cert server.pem
+flatpak run io.github.spyfly.zwift-steamos zluggish off
+```
+
+Offline traffic is redirected with an `LD_PRELOAD` DNS shim inside the game's wine process —
+no `/etc/hosts` entry, no sudoers rule, no system trust store. The server certificate is
+appended to the game's own `data/cacert.pem`. The only optional root step is the one-time
+`sudo bash ~/.local/share/zwift-steamos/bin/setup-system.sh` for ANT+ USB udev rules (and,
+as fallback, a hosts-file helper). Status: `flatpak run io.github.spyfly.zwift-steamos doctor`.
+
 ## Project overview
 
 Zwift has no Linux version. The Windows version can run through **Wine** (the Windows compatibility layer behind Steam's Proton), but out of the box Bluetooth trainers, ANT+ USB sticks and Zwift's launcher all fail. This project puts the fixes together into one installer:
