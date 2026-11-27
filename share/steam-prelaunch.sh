@@ -178,7 +178,7 @@ export ZWIFT_STEAMOS_DATA="$ZWIFT_DATA"
 # window opens on the Steam session (persistent profile, so Keycloak's SSO cookie is
 # remembered and the next start needs no credentials - like the real launcher).
 # ZWIFT_LOGIN_UI=0 restores the old non-interactive gate (exit 102).
-if [ "$ZWIFT_LOGIN_UI" = "0" ]; then
+if [ "${ZWIFT_LOGIN_UI:-1}" = "0" ]; then
     TOKEN_ARGS="--no-login"
 else
     TOKEN_ARGS=""
