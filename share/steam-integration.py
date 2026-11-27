@@ -39,6 +39,9 @@ def userdata_dirs(root):
     if not os.path.isdir(ud):
         sys.exit(f"no {ud} - has Steam ever run for this user?")
     dirs = [os.path.join(ud, d) for d in os.listdir(ud) if d.isdigit()]
+    # prefer real accounts: "0" is Steam's anonymous pre-login profile and can vanish mid-write
+    real = [d for d in dirs if os.path.basename(d) != "0"]
+    dirs = real or dirs
     # newest first: a Steam install has one userdata dir per Steam account
     dirs.sort(key=lambda d: os.path.getmtime(d), reverse=True)
     if not dirs:
@@ -118,6 +121,7 @@ def remove_shortcut(path, appid_s):
 
 def update_compat_mapping(path, appid_u, tool_name):
     """Set CompatToolMapping[appid] = tool in localconfig.vdf (text VDF)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     if not os.path.exists(path):
         with open(path, "w") as f:
             f.write('"InstallConfigStore"\n{\n}\n')
@@ -170,6 +174,7 @@ def main():
     root = steam_root()
     for ud in userdata_dirs(root):
         cfg = os.path.join(ud, "config")
+        os.makedirs(cfg, exist_ok=True)
         sc_path = shortcuts_path(cfg)
         lc_path = os.path.join(cfg, "localconfig.vdf")
 
