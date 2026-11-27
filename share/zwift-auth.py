@@ -26,6 +26,19 @@ DATA = os.environ.get("ZWIFT_STEAMOS_DATA") or os.path.join(
 STORE = os.path.join(DATA, "auth.json")
 UA = "zwift-linux/1.1.0"
 
+# Offline (Zluggish): reach the server by IP while keeping the real hostname for the
+# TLS handshake (SNI) and the Host header. Set ZWIFT_CONNECT_IP (and SSL_CERT_FILE
+# to the server certificate) to enable - e.g. from the flatpak wrapper or prelaunch.
+_CONNECT_IP = os.environ.get("ZWIFT_CONNECT_IP")
+if _CONNECT_IP:
+    import socket as _socket
+    _orig_getaddrinfo = _socket.getaddrinfo
+
+    def _patched_getaddrinfo(host, *args, **kwargs):
+        return _orig_getaddrinfo(_CONNECT_IP, *args, **kwargs)
+
+    _socket.getaddrinfo = _patched_getaddrinfo
+
 
 def http(url, form=None):
     data = urllib.parse.urlencode(form).encode() if form is not None else None

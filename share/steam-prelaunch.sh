@@ -160,17 +160,18 @@ fi
 
 TOKEN_FILE="$PFX/drive_c/zwift-token.json"
 if [ -n "$OFFLINE_HOST" ]; then
-    # Offline server handles auth itself (self-signed TLS would fail the Python check anyway).
-    log "Offline mode ($OFFLINE_HOST): skipping sign-in check."
-else
-    if ! python3 "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" --no-login >>"$LOG" 2>&1; then
-        log "ERROR: not signed in. Run 'zwift login' in Desktop Mode, then start Zwift again."
-        exit 102
-    fi
-    chmod 600 "$TOKEN_FILE" 2>/dev/null || true
-    log "Sign-in token refreshed for launcher version $LAUNCHER_VERSION."
+    # Offline (Zluggish): the auth flow must reach the server by IP (host DNS is not
+    # shimmed - the shim only lives inside the wine process) and trust its certificate.
+    export ZWIFT_CONNECT_IP="$OFFLINE_HOST"
+    export SSL_CERT_FILE="$ZWIFT_DATA/zwift-server.pem"
 fi
+if ! python3 "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" --no-login >>"$LOG" 2>&1; then
+    log "ERROR: no Zwift sign-in yet. Run 'zwift login' once (Desktop Mode), then start Zwift again."
+    exit 102
+fi
+chmod 600 "$TOKEN_FILE" 2>/dev/null || true
 TOKEN_WIN='C:\zwift-token.json'
+log "Sign-in token ready for launcher version $LAUNCHER_VERSION."
 
 # ---------------------------------------------------------------- 5. prefs
 apply_prefs

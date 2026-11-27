@@ -40,6 +40,13 @@ case "$cmd" in
         ZWIFT_FLATPAK=1 bash "$PAYLOAD/install.sh" "$@" ;;
     login|logout|status)
         [ -f "$DATA/zwift-auth.py" ] || { echo "not installed yet - run: flatpak run $APP_ID install"; exit 1; }
+        # Offline (Zluggish): connect by IP (host DNS is not shimmed), trust the server cert
+        if [ -f "$DATA/zwift.conf" ] && grep -q '^ZWIFT_OFFLINE_DEFAULT=' "$DATA/zwift.conf" && [ -f "$DATA/zwift-server.pem" ]; then
+            # shellcheck disable=SC1091
+            . "$DATA/zwift.conf"
+            export ZWIFT_CONNECT_IP="$ZWIFT_OFFLINE_DEFAULT"
+            export SSL_CERT_FILE="$DATA/zwift-server.pem"
+        fi
         exec python3 "$DATA/zwift-auth.py" "$cmd" "$@" ;;
     update)
         [ -f "$DATA/zwift-fetch-game.py" ] || { echo "not installed yet - run: flatpak run $APP_ID install"; exit 1; }
