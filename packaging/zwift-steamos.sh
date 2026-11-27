@@ -32,7 +32,7 @@ The game itself starts from the Steam UI (library entry "Zwift" / "Zwift (Zluggi
 EOF
 }
 
-cmd="${1:-help}"
+cmd="${1:-}"
 [ $# -gt 0 ] && shift
 
 case "$cmd" in
@@ -106,6 +106,22 @@ case "$cmd" in
     uninstall)
         bash "$PAYLOAD/uninstall.sh" "$@" ;;
     help|-h|--help) help ;;
+    setup|run|"")
+        # no subcommand = auto-install on first use: clicking the app icon right after
+        # `flatpak install <bundle>` runs the full setup; afterwards it just reports status.
+        if [ -f "$DATA/zwift.conf" ]; then
+            if [ "$cmd" = "" ]; then
+                echo "zwift-steamos is installed - launch the game from the Steam UI:"
+                echo "  library entry \"Zwift\" (or \"Zwift (Zluggish)\" for offline mode)"
+                echo "subcommands: install login status update doctor zluggish system-setup uninstall help"
+            else
+                echo "usage: flatpak run $APP_ID <command>"; echo; help; exit 1
+            fi
+        else
+            echo "First run - installing Zwift into the host Steam client..."
+            echo "(GE-Proton + game download, ~6 GB total; progress below)"
+            ZWIFT_FLATPAK=1 bash "$PAYLOAD/install.sh" "$@"
+        fi ;;
     *)
         echo "unknown command: $cmd" >&2; help; exit 1 ;;
 esac
