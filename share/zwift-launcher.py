@@ -461,7 +461,67 @@ def ask_code_chromium(url, timeout=None):
     return code
 
 
+def run_settings(url, timeout=7200):
+    """Settings mode: open the Zluggish web UI in the launcher webview and wait
+    until the user closes the window. No token capture, no intercept."""
+    cmd = _chromium_cmd()
+    profile = _profile_dir()
+    _seed_chromium_prefs()
+    os.makedirs(profile, exist_ok=True)
+    env = _clean_env()
+    ozone = (["--ozone-platform=wayland"] if "WAYLAND_DISPLAY" in env
+             else ["--ozone-platform-hint=auto"])
+    args = cmd + ["--app=" + url, "--user-data-dir=" + profile,
+                  "--no-first-run", "--no-default-browser-check",
+                  "--window-size=%d,%d" % WINDOW] + ozone + \
+        ["--disable-features=Translate,RendererCodeIntegrity",
+         "--disable-breakpad"] + _tls_spki_flag()
+    for attempt in range(2):
+        proc = subprocess.Popen(args, env=env,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                text=True, start_new_session=True)
+
+        def _kill_tree():
+            try:
+                os.killpg(os.getpgid(proc.pid), 15)
+            except (ProcessLookupError, PermissionError):
+                pass
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(os.getpgid(proc.pid), 9)
+                except (ProcessLookupError, PermissionError):
+                    pass
+            subprocess.run(["pkill", "-9", "-f", "user-data-dir=" + profile],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        def _drain():
+            err = proc.stderr
+            if err is None:
+                return
+            for line in err:
+                if os.environ.get("ZWIFT_LAUNCHER_DEBUG"):
+                    sys.stderr.write("zwift-launcher: chromium: " + line)
+
+        threading.Thread(target=_drain, daemon=True).start()
+        try:
+            proc.wait(timeout=timeout)
+            if proc.returncode == 0 and attempt == 0:
+                continue  # handed off to an existing instance: retry once
+            return 0
+        except subprocess.TimeoutExpired:
+            return 0
+        finally:
+            _kill_tree()
+    return 0
+
+
 def main(argv):
+    if len(argv) >= 2 and argv[1] == "settings":
+        url = os.environ.get("ZWIFT_SETTINGS_URL") or "https://secure.zwift.com/"
+        run_settings(url)
+        return 0
     if len(argv) < 2:
         print(__doc__, file=sys.stderr)
         return 2

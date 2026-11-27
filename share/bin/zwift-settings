@@ -1,25 +1,17 @@
 #!/bin/bash
-# "Zwift Settings" - interactive sign-in / rider choice (the chromium webview).
-# Opens the launcher window on the secure.zwift.com realm, stores a fresh
-# sign-in token for the game and closes itself. No Proton involved.
+# "Zwift (Settings)" — rider/user selection and account stuff in the Zluggish
+# web UI, shown in the launcher webview (persistent chromium profile, sign-in
+# via the preserved remember cookie). No Proton, no token step; the game start
+# stays launcherless and reads its persisted token on its own.
 set -u
 
 ZWIFT_DATA="${ZWIFT_STEAMOS_DATA:-$HOME/.local/share/zwift-steamos}"
 LOG="$ZWIFT_DATA/settings.log"
 
-log() { echo "zwift-settings: $*" >>"$LOG" 2>&1 || true; }
-
-# Offline mode exports (same as the game prelaunch)
-if [ -f "$ZWIFT_DATA/zwift-server.pem" ]; then
-    export ZWIFT_CONNECT_IP="${ZWIFT_CONNECT_IP:-192.168.30.240}"
-    export SSL_CERT_FILE="$ZWIFT_DATA/zwift-server.pem"
-fi
 export ZWIFT_STEAMOS_DATA="$ZWIFT_DATA"
+export ZWIFT_CONNECT_IP="${ZWIFT_CONNECT_IP:-192.168.30.240}"
+[ -f "$ZWIFT_DATA/zwift-server.pem" ] && export SSL_CERT_FILE="$ZWIFT_DATA/zwift-server.pem"
 
-# The token must land where the game prelaunch reads it
-COMPAT="${STEAM_COMPAT_DATA_PATH:-$HOME/.local/share/Steam/steamapps/compatdata/3907836014}"
-export STEAM_COMPAT_DATA_PATH="$COMPAT"
-TOKEN_FILE="$COMPAT/pfx/drive_c/zwift-token.json"
-
-log "settings window requested (token -> $TOKEN_FILE)"
-exec python3 -u "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" --ui
+log() { echo "zwift-settings: $(date '+%F %T') opening settings webview" >>"$LOG" 2>&1 || true; }
+log
+exec python3 -u "$ZWIFT_DATA/zwift-launcher.py" settings
