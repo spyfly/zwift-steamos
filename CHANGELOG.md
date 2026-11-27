@@ -88,3 +88,11 @@
 
 - Runs Zwift without the Windows launcher, which stopped working under Wine with launcher 1.2.0
   ([#1](https://github.com/Gititwhileitshott/zwift-linux/pull/1)). See the README.
+
+### TODO (next release)
+- Fresh prefixes need WebView2 Runtime + VC++ 2015-2022 x64 redistributable installed into the
+  prefix. GE-Proton's protonfixes finds no global fix for the custom AppId (umu-zwift), so both
+  installs must be added to install.sh (proton runinprefix vc_redist.x64.exe /install /quiet;
+  Evergreen WebView2 standalone /silent /install). Symptoms otherwise: silent UI crash at boot
+  (no WebView2), then 0x80000100 abort in builtin vccorlib140.dll at the BLE device-activation
+  callback (missing function Zwift's BleWin10Lib needs).
