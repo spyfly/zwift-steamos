@@ -211,6 +211,25 @@ def _seed_chromium_prefs():
         pass
 
 
+def _tls_spki_flag():
+    # Offline the auth realm is served by Zluggish with its own certificate under a
+    # zwift.com hostname; pin-exception by SPKI so only that cert is exempted
+    # (online launches export no SSL_CERT_FILE and keep full validation).
+    cert = os.environ.get("SSL_CERT_FILE")
+    if not cert:
+        return []
+    try:
+        pub = subprocess.run(["openssl", "x509", "-in", cert, "-pubkey", "-noout"],
+                             capture_output=True, text=True, timeout=10, check=True)
+        der = subprocess.run(["openssl", "pkey", "-pubin", "-outform", "DER"],
+                             input=pub.stdout.encode(), capture_output=True,
+                             timeout=10, check=True)
+        return ["--ignore-certificate-errors-spki-list="
+                + base64.b64encode(der.stdout).decode()]
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+
 def ask_code_chromium(url, timeout=None):
     """Open the sign-in page in a Chromium app window; return the ?code= of the
     http://zwift/ redirect, or None if the user cancelled/it timed out."""
@@ -224,7 +243,7 @@ def ask_code_chromium(url, timeout=None):
                   "--no-default-browser-check", "--window-size=%d,%d" % WINDOW,
                   "--ozone-platform-hint=auto",
                   "--disable-features=Translate,RendererCodeIntegrity",
-                  "--disable-breakpad"]
+                  "--disable-breakpad"] + _tls_spki_flag()
     code = None
     error = None
     proc = None

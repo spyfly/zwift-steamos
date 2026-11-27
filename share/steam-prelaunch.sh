@@ -181,7 +181,7 @@ export ZWIFT_STEAMOS_DATA="$ZWIFT_DATA"
 if [ "${ZWIFT_LOGIN_UI:-1}" = "0" ]; then
     TOKEN_ARGS="--no-login"
 else
-    TOKEN_ARGS=""
+    TOKEN_ARGS="--ui"
 fi
 if ! python3 -u "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" $TOKEN_ARGS >>"$LOG" 2>&1; then
     log "ERROR: no Zwift sign-in. Run 'zwift login' once (Desktop Mode), then start Zwift again."

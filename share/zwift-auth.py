@@ -174,14 +174,15 @@ def login(base):
             code = None
     else:
         code = None
-    if code is None and not os.environ.get("ZWIFT_AUTH_BROWSER"):
-        try:
-            code = ask_code_webkit(url)
-        except (ImportError, ValueError) as e:
-            print(f"zwift-auth: no WebKitGTK 6 window ({e}); using your browser instead.", file=sys.stderr)
+    if code is None and os.environ.get("ZWIFT_AUTH_NO_FALLBACK") != "1":
+        if os.environ.get("ZWIFT_AUTH_BROWSER"):
             code = ask_code_browser(url)
-    else:
-        code = ask_code_browser(url) if code is None and os.environ.get("ZWIFT_AUTH_BROWSER") else code
+        else:
+            try:
+                code = ask_code_webkit(url)
+            except (ImportError, ValueError) as e:
+                print(f"zwift-auth: no WebKitGTK 6 window ({e}); using your browser instead.", file=sys.stderr)
+                code = ask_code_browser(url)
     if not code:
         sys.exit("zwift-auth: sign-in was cancelled")
     # The launcher sends the redirect as "redirect_url"; Keycloak checks "redirect_uri". Send both.
@@ -222,8 +223,19 @@ def main(argv):
         login(base); print("Signed in to Zwift."); return 0
     if cmd == "token":
         if len(argv) < 3:
-            sys.exit("usage: zwift-auth.py token FILE [--no-login]")
-        tok = fresh_token(base, interactive="--no-login" not in argv)
+            sys.exit("usage: zwift-auth.py token FILE [--no-login] [--ui]")
+        if "--ui" in argv:
+            # show the launcher window on every start (persistent profile makes the
+            # Keycloak sign-in silent); fall back to the stored session if it can't.
+            os.environ["ZWIFT_AUTH_NO_FALLBACK"] = "1"
+            try:
+                tok = login(base)
+            except SystemExit as e:
+                print(f"zwift-auth: launcher window unavailable ({e}); using stored session",
+                      file=sys.stderr)
+                tok = fresh_token(base, interactive=False)
+        else:
+            tok = fresh_token(base, interactive="--no-login" not in argv)
         fd = os.open(argv[2], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as f:
             f.write(game_json(tok))
