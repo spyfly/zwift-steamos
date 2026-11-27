@@ -113,10 +113,11 @@ else
 fi
 
 # A simple icon so the library entry does not look like a broken puzzle piece.
+ICON="$DATA/zwift.png"
 if [ -f "$HERE/share/app-icon.png" ]; then
     install -m 644 "$HERE/share/app-icon.png" "$DATA/zwift.png"
 else
-    ZP_OUT="$DATA/zwift.png" python3 - <<'EOF' || ICON=""
+    ZP_OUT="$DATA/zwift.png" python3 - <<'EOF' || true
 import struct, zlib, os
 W = H = 256
 px = bytearray()
@@ -139,7 +140,6 @@ png = (b'\x89PNG\r\n\x1a\n'
        + chunk(b'IEND', b''))
 open(os.environ['ZP_OUT'], 'wb').write(png)
 EOF
-ICON="$DATA/zwift.png"
 fi
 
 CONF="$DATA/zwift.conf"
