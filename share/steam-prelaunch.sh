@@ -183,7 +183,7 @@ if [ "$ZWIFT_LOGIN_UI" = "0" ]; then
 else
     TOKEN_ARGS=""
 fi
-if ! python3 "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" $TOKEN_ARGS >>"$LOG" 2>&1; then
+if ! python3 -u "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" $TOKEN_ARGS >>"$LOG" 2>&1; then
     log "ERROR: no Zwift sign-in. Run 'zwift login' once (Desktop Mode), then start Zwift again."
     exit 102
 fi
