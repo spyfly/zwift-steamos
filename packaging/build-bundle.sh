@@ -58,7 +58,7 @@ EOF
 
 # --- export + bundle ----------------------------------------------------------
 mkdir -p "$OUT_DIR"
-flatpak build-export --arch="$ARCH" --disable-sandbox --update "$REPO_DIR" "$STAGE" "$VERSION" >/dev/null
+flatpak build-export --arch="$ARCH" --disable-sandbox "$REPO_DIR" "$STAGE" "$VERSION" >/dev/null
 flatpak build-bundle "$REPO_DIR" "$OUT_DIR/zwift-steamos-$VERSION.flatpak" "$APP_ID" "$VERSION"
 
 echo "wrote $OUT_DIR/zwift-steamos-$VERSION.flatpak ($(du -h "$OUT_DIR/zwift-steamos-$VERSION.flatpak" | cut -f1))"
