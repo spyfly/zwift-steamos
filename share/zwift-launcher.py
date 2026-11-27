@@ -227,10 +227,13 @@ def ask_code_chromium(url, timeout=None):
                   "--disable-breakpad"]
     code = None
     error = None
+    proc = None
 
     def _kill_tree():
         # chromium runs under the flatpak's bwrap: killing the wrapper alone orphans
         # the browser. Signal the whole process group instead.
+        if proc is None:
+            return
         try:
             os.killpg(os.getpgid(proc.pid), 15)
         except (ProcessLookupError, PermissionError):
