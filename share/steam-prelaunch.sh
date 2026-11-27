@@ -28,7 +28,15 @@ fi
 GAME_DIR="${GAME_DIR:-$ZWIFT_DATA/game}"
 
 LOG="$ZWIFT_DATA/prelaunch.log"
-log() { printf '[zwift-steamos %s] %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$LOG" >&2; }
+log() {
+    # Write to the log file directly and echo to stderr best-effort. Do NOT pipe through
+    # `tee` here: Steam's stderr capture pipe can be O_NONBLOCK, which makes tee spin in a
+    # poll loop forever - the script then blocks in wait4 on the tee and never launches.
+    local line
+    line="$(printf '[zwift-steamos %s] %s' "$(date +%H:%M:%S)" "$*")"
+    printf '%s\n' "$line" >>"$LOG" 2>/dev/null || true
+    printf '%s\n' "$line" >&2 2>/dev/null || true
+}
 mkdir -p "$ZWIFT_DATA"
 
 log "prelaunch: data=$ZWIFT_DATA game=$GAME_DIR"
