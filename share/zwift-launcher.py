@@ -160,6 +160,7 @@ def _devtools_port(proc, deadline=20.0):
         if "DevTools listening" in line:
             ws = line.split("DevTools listening on ")[1].strip()
             return urllib.parse.urlsplit(ws).port, ws
+        sys.stderr.write("zwift-launcher: chromium: " + line)
     raise RuntimeError("no DevTools endpoint from chromium (timeout)")
 
 
