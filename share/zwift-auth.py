@@ -146,18 +146,42 @@ def ask_code_browser(url):
     return (urllib.parse.parse_qs(urllib.parse.urlsplit(line).query).get("code") or [None])[0]
 
 
+def _load_chromium_launcher():
+    import importlib.util
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "zwift-launcher.py")
+    spec = importlib.util.spec_from_file_location("zwift_launcher", p)
+    assert spec is not None and spec.loader is not None, "zwift-launcher.py missing"
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
 def login(base):
     url = base + "/auth?" + urllib.parse.urlencode(
         {"client_id": CLIENT_ID, "redirect_uri": REDIRECT, "login": "true", "response_type": "code"})
-    code = None
-    if not os.environ.get("ZWIFT_AUTH_BROWSER"):
+    # Chromium launcher: persistent profile means Keycloak's SSO cookie is remembered,
+    # so this URL must NOT force the login form (no "login": "true").
+    if os.environ.get("ZWIFT_AUTH_CHROMIUM", "1") != "0":
+        try:
+            m = _load_chromium_launcher()
+            sso_url = base + "/auth?" + urllib.parse.urlencode(
+                {"client_id": CLIENT_ID, "redirect_uri": REDIRECT, "response_type": "code"})
+            code = m.ask_code_chromium(sso_url)
+        except SystemExit:
+            raise
+        except Exception as e:  # noqa: BLE001 - fall back to the WebKit/browser paths
+            print(f"zwift-auth: chromium launcher unavailable ({e})", file=sys.stderr)
+            code = None
+    else:
+        code = None
+    if code is None and not os.environ.get("ZWIFT_AUTH_BROWSER"):
         try:
             code = ask_code_webkit(url)
         except (ImportError, ValueError) as e:
             print(f"zwift-auth: no WebKitGTK 6 window ({e}); using your browser instead.", file=sys.stderr)
             code = ask_code_browser(url)
     else:
-        code = ask_code_browser(url)
+        code = ask_code_browser(url) if code is None and os.environ.get("ZWIFT_AUTH_BROWSER") else code
     if not code:
         sys.exit("zwift-auth: sign-in was cancelled")
     # The launcher sends the redirect as "redirect_url"; Keycloak checks "redirect_uri". Send both.

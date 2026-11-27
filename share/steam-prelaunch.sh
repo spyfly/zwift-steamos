@@ -173,8 +173,18 @@ if [ -n "$OFFLINE_HOST" ]; then
     export ZWIFT_CONNECT_IP="$OFFLINE_HOST"
     export SSL_CERT_FILE="$ZWIFT_DATA/zwift-server.pem"
 fi
-if ! python3 "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" --no-login >>"$LOG" 2>&1; then
-    log "ERROR: no Zwift sign-in yet. Run 'zwift login' once (Desktop Mode), then start Zwift again."
+export ZWIFT_STEAMOS_DATA="$ZWIFT_DATA"
+# Interactive sign-in by default: if no token can be refreshed, the chromium launcher
+# window opens on the Steam session (persistent profile, so Keycloak's SSO cookie is
+# remembered and the next start needs no credentials - like the real launcher).
+# ZWIFT_LOGIN_UI=0 restores the old non-interactive gate (exit 102).
+if [ "$ZWIFT_LOGIN_UI" = "0" ]; then
+    TOKEN_ARGS="--no-login"
+else
+    TOKEN_ARGS=""
+fi
+if ! python3 "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" $TOKEN_ARGS >>"$LOG" 2>&1; then
+    log "ERROR: no Zwift sign-in. Run 'zwift login' once (Desktop Mode), then start Zwift again."
     exit 102
 fi
 chmod 600 "$TOKEN_FILE" 2>/dev/null || true

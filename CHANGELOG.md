@@ -96,3 +96,16 @@
   Evergreen WebView2 standalone /silent /install). Symptoms otherwise: silent UI crash at boot
   (no WebView2), then 0x80000100 abort in builtin vccorlib140.dll at the BLE device-activation
   callback (missing function Zwift's BleWin10Lib needs).
+
+### Chromium webview launcher (2026-11-27)
+- share/zwift-launcher.py: chromium app-window sign-in replicating the stock Zwift
+  launcher: login page in-window, http://zwift/?code= redirect intercepted via the
+  DevTools Fetch domain, authorization code returned to zwift-auth.login() for the
+  token exchange. Persistent profile (~/.var/app/org.chromium.Chromium/config/
+  zwift-launcher-profile for the flatpak) remembers Keycloak's SSO cookie - the SSO
+  URL omits login=true, so repeat sign-ins complete without credentials.
+- zwift-auth.login(): chromium first (ZWIFT_AUTH_CHROMIUM=0 to disable), WebKitGTK
+  and browser-paste stay as fallbacks with the old force-login URL.
+- prelaunch: interactive token refresh by default (ZWIFT_LOGIN_UI=0 restores the
+  non-interactive exit-102 gate) - the launcher window now opens directly on the
+  Steam session when signed out, no Desktop-Mode detour.
