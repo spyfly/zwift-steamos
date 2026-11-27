@@ -186,6 +186,63 @@ def _page_target(port):
     return pages[0]["webSocketDebuggerUrl"]
 
 
+def _ws_call(sock, mid, method, params=None):
+    """Send one CDP command and wait for its id-matched response (best effort)."""
+    _ws_send(sock, {"id": mid, "method": method, "params": params or {}})
+    sock.settimeout(5)
+    try:
+        while True:
+            try:
+                raw = _read_ws_message(sock)
+            except socket.timeout:
+                return {}
+            try:
+                msg = json.loads(raw)
+            except ValueError:
+                continue
+            if msg.get("id") == mid:
+                return msg
+    finally:
+        sock.settimeout(None)
+
+
+def _import_remember_cookies(sock):
+    """Seed Zluggish's remember-me cookie(s) from remember-cookies.json into the
+    chromium profile via CDP. The realm renews the cookie on every rider login,
+    so this is only the initial bootstrap (e.g. after a lost profile)."""
+    path = (os.environ.get("ZWIFT_REMEMBER_COOKIES")
+            or os.path.join(os.environ.get("ZWIFT_STEAMOS_DATA", ""),
+                            "remember-cookies.json"))
+    try:
+        with open(path) as f:
+            cookies = json.load(f)
+    except (OSError, ValueError):
+        return
+    if not isinstance(cookies, list):
+        return
+    _ws_call(sock, 100, "Network.enable", {})
+    mid, ok = 101, 0
+    for c in cookies:
+        if not isinstance(c, dict) or not c.get("name") or not c.get("domain"):
+            continue
+        params = {"name": c["name"], "value": str(c.get("value", "")),
+                  "domain": c["domain"], "path": c.get("path") or "/",
+                  "secure": bool(c.get("secure")), "httpOnly": bool(c.get("httpOnly"))}
+        exp = c.get("expirationDate")
+        if isinstance(exp, (int, float)):
+            params["expires"] = float(exp)
+        ss = c.get("sameSite")
+        if isinstance(ss, str) and ss.lower() in ("strict", "lax", "none"):
+            params["sameSite"] = ss.title()
+        msg = _ws_call(sock, mid, "Network.setCookie", params)
+        mid += 1
+        if msg.get("result", {}).get("success"):
+            ok += 1
+        else:
+            sys.stderr.write(f"zwift-launcher: cookie {c.get('name')} not set: {msg}\n")
+    sys.stderr.write(f"zwift-launcher: remember cookies imported: {ok}/{len(cookies)}\n")
+
+
 _SUCCESS_PAGE = (
     "<html><body style=\"background:#10151d;color:#fc4c02;font-family:sans-serif;"
     "display:grid;place-items:center;height:92vh;text-align:center\">"
@@ -324,6 +381,7 @@ def ask_code_chromium(url, timeout=None):
         sock = _ws_connect(target)
         global WS
         WS = sock
+        _import_remember_cookies(sock)
         _ws_send(sock, {"id": 1, "method": "Fetch.enable", "params": {"patterns": [
             {"urlPattern": "http://zwift/*"}, {"urlPattern": "http://zwift?*"}]}})
         mid = 1

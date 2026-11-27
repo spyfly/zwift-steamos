@@ -188,24 +188,19 @@ if [ -n "$OFFLINE_HOST" ]; then
     export SSL_CERT_FILE="$ZWIFT_DATA/zwift-server.pem"
 fi
 export ZWIFT_STEAMOS_DATA="$ZWIFT_DATA"
-# Remember the session: try a silent refresh from the stored auth.json FIRST;
-# the chromium launcher window only opens when that fails (first sign-in or an
-# expired refresh token) - like the real launcher, which stays invisible while
-# its session is alive. ZWIFT_LOGIN_UI=0 keeps the old non-interactive gate.
+# Launcher window on every start (like the real launcher). The realm's remember
+# cookie (zluggish_remember_1, seeded via remember-cookies.json and renewed by
+# Zluggish on each rider click) makes the window a one-click rider choice - no
+# password. ZWIFT_LOGIN_UI=0 restores the old non-interactive gate (exit 102).
 if [ "${ZWIFT_LOGIN_UI:-1}" = "0" ]; then
     if ! python3 -u "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" --no-login >>"$LOG" 2>&1; then
         log "ERROR: no Zwift sign-in. Run 'zwift login' once (Desktop Mode), then start Zwift again."
         exit 102
     fi
 else
-    if python3 -u "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" --no-login >>"$LOG" 2>&1; then
-        : # silent refresh ok
-    else
-        log "Silent token refresh failed - opening launcher window for sign-in."
-        python3 -u "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" --ui >>"$LOG" 2>&1 || {
-            log "ERROR: no Zwift sign-in. Run 'zwift login' once (Desktop Mode), then start Zwift again."
-            exit 102
-        }
+    if ! python3 -u "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" --ui >>"$LOG" 2>&1; then
+        log "ERROR: no Zwift sign-in. Run 'zwift login' once (Desktop Mode), then start Zwift again."
+        exit 102
     fi
 fi
 chmod 600 "$TOKEN_FILE" 2>/dev/null || true
