@@ -157,7 +157,8 @@ EOF
 say "2/6 Installing GE-Proton compatibility tool ($GE_ZWIFT)"
 mkdir -p "$COMPAT_DIR"
 if [ ! -f "$GE_DIR/files/lib/wine/x86_64-unix/wine/boot" ] && [ ! -f "$GE_DIR/proton" ]; then
-    tmp="$(mktemp -d)"
+    # extract under $DATA (disk-backed): sandbox /tmp is a small tmpfs, too small for GE
+    tmp="$(mktemp -d "$DATA/tmp-ge.XXXXXX")"
     trap 'rm -rf "$tmp"' EXIT
     say "   downloading $GE_VERSION (~560 MB) ..."
     curl -fL --retry 3 -o "$tmp/$GE_VERSION-x86_64.tar.gz" "$GE_RELEASE_URL/$GE_VERSION/$GE_VERSION-x86_64.tar.gz" \
