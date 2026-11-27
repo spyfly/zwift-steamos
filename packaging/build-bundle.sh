@@ -27,8 +27,11 @@ command -v flatpak >/dev/null || { echo "flatpak not found" >&2; exit 1; }
 [ -f share/app-icon.png ] || { echo "share/app-icon.png missing" >&2; exit 1; }
 
 # --- app file tree -----------------------------------------------------------
-cc -shared -fPIC -O2 -Wall -o share/zwift-dns-shim.so share/zwift-dns-shim.c -ldl \
-    || { echo "failed to compile the DNS shim" >&2; exit 1; }
+if [ ! -f share/zwift-dns-shim.so ]; then
+    command -v cc >/dev/null 2>&1 || { echo "no cc and no prebuilt share/zwift-dns-shim.so" >&2; exit 1; }
+    cc -shared -fPIC -O2 -Wall -o share/zwift-dns-shim.so share/zwift-dns-shim.c -ldl \
+        || { echo "failed to compile the DNS shim" >&2; exit 1; }
+fi
 mkdir -p "$STAGE/files/bin" "$STAGE/files/share/zwift-steamos"
 cp -r share zwift-start ant-libusb wine-patches install.sh uninstall.sh "$STAGE/files/share/zwift-steamos/"
 install -m 755 packaging/zwift-steamos.sh "$STAGE/files/bin/zwift-steamos"

@@ -23,6 +23,9 @@ zwift-steamos (flatpak) — Zwift from the Steam UI on SteamOS
   status    show the sign-in state
   update    update the game files from Zwift's server
   doctor    environment checks
+  zluggish  configure the offline server without reinstall:
+              zluggish --host 192.168.30.240 --cert <pem>   (cert under $DATA)
+              zluggish off
   system-setup  print the one-time sudo command for the root-level bits (udev, sudoers, trust)
 
 The game itself starts from the Steam UI (library entry "Zwift" / "Zwift (Zluggish)").
@@ -44,6 +47,54 @@ case "$cmd" in
     doctor)
         [ -x "$DATA/bin/zwift-doctor" ] || { echo "not installed yet - run: flatpak run $APP_ID install"; exit 1; }
         exec bash "$DATA/bin/zwift-doctor" ;;
+    zluggish)
+        # Configure the offline (Zluggish) server without reinstalling.
+        #   zluggish --host 192.168.30.240 --cert <pem>   enable: cert into the game's CA bundle,
+        #                                                 ZWIFT_OFFLINE_DEFAULT into the conf,
+        #                                                 (re)create the "Zwift (Zluggish)" shortcut
+        #   zluggish off                                  disable offline default
+        # NOTE: inside the flatpak sandbox only $DATA is writable-shared - pass the cert path
+        # under ~/.local/share/zwift-steamos/ (e.g. copy it there first).
+        [ -f "$DATA/zwift.conf" ] || { echo "not installed yet - run: flatpak run $APP_ID install"; exit 1; }
+        host=""; cert=""; off=0
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --host) host="$2"; shift 2 ;;
+                --cert) cert="$2"; shift 2 ;;
+                off) off=1; shift ;;
+                *) echo "unknown option: $1 (use --host <ip> --cert <pem> | off)"; exit 1 ;;
+            esac
+        done
+        # shellcheck disable=SC1091
+        . "$DATA/zwift.conf"   # GAME_DIR, COMPAT_TOOL, ZWIFT_STEAMOS_DATA
+        if [ "$off" = 1 ]; then
+            sed -i '/ZWIFT_OFFLINE_DEFAULT=/d' "$DATA/zwift.conf"
+            echo "offline default disabled (existing 'Zwift (Zluggish)' shortcut still works per-launch)"
+            exit 0
+        fi
+        [ -n "$host" ] || { echo "usage: flatpak run $APP_ID zluggish --host <ip> --cert <pem>"; exit 1; }
+        if [ -n "$cert" ] && [ -f "$cert" ]; then
+            install -m 644 "$cert" "$DATA/zwift-server.pem"
+            cacert="$GAME_DIR/data/cacert.pem"
+            if [ -f "$cacert" ]; then
+                mark=$(sed -n '2p' "$DATA/zwift-server.pem")
+                grep -qF "$mark" "$cacert" || { cat "$DATA/zwift-server.pem" >> "$cacert"; echo "server certificate appended to $cacert"; }
+            else
+                echo "game not downloaded yet - the certificate is appended on first launch"
+            fi
+        elif [ -n "$cert" ]; then
+            echo "certificate file not found: $cert (inside the sandbox only $DATA is visible)"; exit 1
+        fi
+        sed -i '/ZWIFT_OFFLINE_DEFAULT=/d' "$DATA/zwift.conf"
+        echo "ZWIFT_OFFLINE_DEFAULT=\"$host\"" >> "$DATA/zwift.conf"
+        icon="$DATA/zwift.png"
+        LAUNCH_ZLUG="ZWIFT_STEAMOS_DATA=$DATA ZWIFT_OFFLINE_HOST=$host $DATA/bin/steam-prelaunch %command%"
+        python3 "$PAYLOAD/share/steam-integration.py" \
+            --exe "$GAME_DIR/LinuxZwiftLauncher.exe" --app-name "Zwift (Zluggish)" \
+            --startdir "$GAME_DIR" --icon "$icon" \
+            --compat-tool "${COMPAT_TOOL:-}" --launch-options "$LAUNCH_ZLUG" \
+            --description "Zwift via Zluggish offline server" \
+            && echo "offline server configured: $host ('Zwift (Zluggish)' shortcut ready - restart Steam to pick it up)" ;;
     system-setup)
         if [ -f "$DATA/bin/setup-system.sh" ]; then
             echo "One-time root-level setup (udev rules, sudoers, trust anchor, SteamOS /etc persistence):"
