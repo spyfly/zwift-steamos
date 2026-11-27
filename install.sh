@@ -259,7 +259,10 @@ if [ -n "$ZLUGGISH_CERT" ] || [ -n "$ZLUGGISH_HOST" ]; then
         warn "no prebuilt shim and no compiler: offline mode will use the hosts helper (needs setup-system.sh)"
     fi
     if [ -n "$ZLUGGISH_CERT" ]; then
-        install -m 644 "$ZLUGGISH_CERT" "$DATA/zwift-server.pem"
+        # skip when the cert already lives in DATA (same file -> install/cp refuse)
+        if [ "$(realpath -- "$ZLUGGISH_CERT")" != "$(realpath -- "$DATA/zwift-server.pem" 2>/dev/null || echo /nonexistent)" ]; then
+            install -m 644 "$ZLUGGISH_CERT" "$DATA/zwift-server.pem"
+        fi
         append_server_cert
     else
         warn "no --zluggish-cert given: traffic redirect works, but HTTPS to the server will fail without its certificate"
