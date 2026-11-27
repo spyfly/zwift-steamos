@@ -255,8 +255,10 @@ def _import_remember_cookies(sock):
     return ok
 
 
-_RIDER_CLICK_JS = ('(() => { const b = document.querySelector("button[name=\\"player_id\\"]");'
-                   ' return b ? (b.click(), "clicked") : "norider"; })()')
+_RIDER_CLICK_JS = ('(() => { const f = document.querySelector(\'form[id^="game-form-rider-"]\');'
+                   ' if (!f) return "norider";'
+                   ' (f.querySelector("button[type=submit]") || f).click();'
+                   ' return "clicked:" + f.id; })()')
 
 _SUCCESS_PAGE = (
     "<html><body style=\"background:#10151d;color:#fc4c02;font-family:sans-serif;"
@@ -430,6 +432,10 @@ def ask_code_chromium(url, timeout=None):
                 msg = json.loads(raw)
             except ValueError:
                 continue
+            if isinstance(msg.get("id"), int) and msg["id"] >= 4000:
+                r = (msg.get("result") or {}).get("result") or {}
+                sys.stderr.write(f"zwift-launcher: click#{msg['id'] - 4000}: "
+                                 f"{r.get('value') if r else msg.get('error')}\n")
             if msg.get("method") != "Fetch.requestPaused":
                 continue
             params = msg.get("params", {})

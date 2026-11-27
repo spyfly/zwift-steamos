@@ -188,18 +188,18 @@ if [ -n "$OFFLINE_HOST" ]; then
     export SSL_CERT_FILE="$ZWIFT_DATA/zwift-server.pem"
 fi
 export ZWIFT_STEAMOS_DATA="$ZWIFT_DATA"
-# Launcher window on every start (like the real launcher). The realm's remember
-# cookie (zluggish_remember_1, seeded via remember-cookies.json and renewed by
-# Zluggish on each rider click) makes the window a one-click rider choice - no
-# password. ZWIFT_LOGIN_UI=0 restores the old non-interactive gate (exit 102).
-if [ "${ZWIFT_LOGIN_UI:-1}" = "0" ]; then
-    if ! python3 -u "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" --no-login >>"$LOG" 2>&1; then
-        log "ERROR: no Zwift sign-in. Run 'zwift login' once (Desktop Mode), then start Zwift again."
+# The game start uses the persisted token only - no window, no sign-in flow.
+# Interactive sign-in (rider choice / user switch) lives in the separate
+# "Zwift Settings" shortcut, which runs the launcher window and stores a fresh
+# token for every following start. ZWIFT_LOGIN_UI=1 forces the window back.
+if [ "${ZWIFT_LOGIN_UI:-0}" = "1" ]; then
+    if ! python3 -u "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" --ui >>"$LOG" 2>&1; then
+        log "ERROR: sign-in window failed. Start 'Zwift Settings' once to sign in."
         exit 102
     fi
 else
-    if ! python3 -u "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" --ui >>"$LOG" 2>&1; then
-        log "ERROR: no Zwift sign-in. Run 'zwift login' once (Desktop Mode), then start Zwift again."
+    if ! python3 -u "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" --no-login >>"$LOG" 2>&1; then
+        log "No valid stored session. Start 'Zwift Settings' once to sign in."
         exit 102
     fi
 fi

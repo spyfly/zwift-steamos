@@ -1,0 +1,31 @@
+#!/bin/bash
+# "Zwift (Settings)" — runs the OFFICIAL Zwift launcher (WebView2 UI, rider
+# selection / user switch) from the Wine prefix via the installed GE-Proton.
+# Steam starts this as a native launch-options command: no compat tool, no
+# prelaunch, no token step. The game's stored token keeps working on its own.
+set -u
+
+ZWIFT_DATA="${ZWIFT_STEAMOS_DATA:-$HOME/.local/share/zwift-steamos}"
+LOG="$ZWIFT_DATA/settings.log"
+STEAM_ROOT="${STEAM_ROOT:-$HOME/.local/share/Steam}"
+COMPAT="$STEAM_ROOT/steamapps/compatdata/3907836014"
+PROTON="$(find "$STEAM_ROOT/compatibilitytools.d" -maxdepth 2 -name proton -path '*zwift*' | head -1)"
+
+if [ ! -x "$PROTON" ]; then
+    echo "zwift-settings: no zwift GE-Proton found" >&2
+    exit 1
+fi
+LAUNCHER_DIR="$COMPAT/pfx/drive_c/Program Files (x86)/Zwift"
+if [ ! -f "$LAUNCHER_DIR/ZwiftLauncher.exe" ]; then
+    echo "zwift-settings: official launcher not installed yet; install with:" >&2
+    echo "  proton runinprefix '$ZWIFT_DATA/game/ZwiftSetup.exe' /VERYSILENT /NORESTART" >&2
+    exit 1
+fi
+export STEAM_COMPAT_DATA_PATH="$COMPAT"
+export STEAM_COMPAT_CLIENT_INSTALL_PATH="$STEAM_ROOT"
+export ZWIFT_CONNECT_IP="${ZWIFT_CONNECT_IP:-192.168.30.240}"
+
+log() { echo "zwift-settings: $(date '+%F %T') starting official launcher" >>"$LOG" 2>&1 || true; }
+log
+cd "$LAUNCHER_DIR"
+exec python3 "$PROTON" runinprefix ZwiftLauncher.exe
