@@ -240,9 +240,13 @@ def ask_code_chromium(url, timeout=None):
         mid = 1
         deadline = time.time() + timeout
         while time.time() < deadline:
+            if proc.poll() is not None:
+                break
             try:
                 raw = _read_ws_message(sock)
-            except (ConnectionError, socket.timeout, OSError):
+            except TimeoutError:
+                continue  # quiet page - the sign-in form can sit there for minutes
+            except (ConnectionError, OSError):
                 break
             try:
                 msg = json.loads(raw)
