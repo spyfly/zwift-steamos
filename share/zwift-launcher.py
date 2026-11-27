@@ -243,11 +243,16 @@ def ask_code_chromium(url, timeout=None):
     _seed_chromium_prefs()
     os.makedirs(profile, exist_ok=True)
     timeout = timeout or float(os.environ.get("ZWIFT_AUTH_TIMEOUT", "600"))
+    env = _clean_env()
+    # Wayland sessions must not let ozone fall back to X11 (XAUTHORITY is absent
+    # in the cleaned env); only pure-X11 sessions keep the auto hint.
+    ozone = (["--ozone-platform=wayland"] if "WAYLAND_DISPLAY" in env
+             else ["--ozone-platform-hint=auto"])
     args = cmd + ["--app=" + url, "--user-data-dir=" + profile,
                   "--remote-debugging-port=0", "--no-first-run",
-                  "--no-default-browser-check", "--window-size=%d,%d" % WINDOW,
-                  "--ozone-platform-hint=auto",
-                  "--disable-features=Translate,RendererCodeIntegrity",
+                  "--no-default-browser-check", "--window-size=%d,%d" % WINDOW] \
+        + ozone + \
+                  ["--disable-features=Translate,RendererCodeIntegrity",
                   "--disable-breakpad"] + _tls_spki_flag()
     code = None
     error = None
