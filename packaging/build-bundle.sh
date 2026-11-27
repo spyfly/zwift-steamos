@@ -32,6 +32,7 @@ if [ ! -f share/zwift-dns-shim.so ]; then
     cc -shared -fPIC -O2 -Wall -o share/zwift-dns-shim.so share/zwift-dns-shim.c -ldl \
         || { echo "failed to compile the DNS shim" >&2; exit 1; }
 fi
+flatpak build-init "$STAGE" "$APP_ID" "$SDK" "$RUNTIME" "$RUNTIME_VERSION"
 mkdir -p "$STAGE/files/bin" "$STAGE/files/share/zwift-steamos"
 cp -r share zwift-start ant-libusb wine-patches install.sh uninstall.sh "$STAGE/files/share/zwift-steamos/"
 install -m 755 packaging/zwift-steamos.sh "$STAGE/files/bin/zwift-steamos"
@@ -42,19 +43,11 @@ install -Dm644 packaging/io.github.spyfly.zwift-steamos.desktop \
 install -Dm644 share/icons/hicolor/256x256/apps/io.github.spyfly.zwift-steamos.png \
     "$STAGE/files/share/icons/hicolor/256x256/apps/io.github.spyfly.zwift-steamos.png"
 
-cat > "$STAGE/metadata" <<EOF
-[Application]
-name=$APP_ID
-runtime=$RUNTIME/$ARCH/$RUNTIME_VERSION
-sdk=$SDK/$ARCH/$RUNTIME_VERSION
-command=zwift-steamos
-
-[Context]
-shared=network;
-filesystems=xdg-data/zwift-steamos:create;xdg-data/Steam:create;
-devices=;
-sockets=;
-EOF
+flatpak build-finish "$STAGE" \
+    --command=zwift-steamos \
+    --share=network \
+    --filesystem=xdg-data/zwift-steamos:create \
+    --filesystem=xdg-data/Steam:create >/dev/null
 
 # --- export + bundle ----------------------------------------------------------
 mkdir -p "$OUT_DIR"
