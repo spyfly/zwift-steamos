@@ -109,3 +109,16 @@
 - prelaunch: interactive token refresh by default (ZWIFT_LOGIN_UI=0 restores the
   non-interactive exit-102 gate) - the launcher window now opens directly on the
   Steam session when signed out, no Desktop-Mode detour.
+
+### Chromium launcher verified (2026-11-27)
+- End-to-end intercept test on the Steam Machine PASSED: app window on the gaming
+  session (Wayland), data-URL JS-redirect to http://zwift/?code=test123, CDP Fetch
+  intercept returned the code, exit 0.
+- Flatpak-chromium quirks handled: wrapper's unlink_profiles.py exits 1 without
+  $XDG_CONFIG_HOME/chromium/Default/Preferences (launcher seeds it); X11 auth fails
+  under flatpak so --ozone-platform-hint=auto runs Wayland; terminate() must signal
+  the process group (bwrap orphans chrome otherwise); a leftover instance hands off
+  and exits 0 - launcher kills it and retries once; CDP socket idles are tolerated
+  (the sign-in form can sit still for minutes).
+- deploy note: flatpak install MUST run as the deck user (as root it lands in
+  /root/.local/share/flatpak and deck's store keeps serving the old build).
