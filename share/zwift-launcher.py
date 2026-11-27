@@ -206,6 +206,10 @@ def _clean_env():
             "DBUS_SESSION_BUS_ADDRESS", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "TMPDIR",
             "XDG_DATA_DIRS", "XDG_CONFIG_DIRS")
     env = {k: os.environ[k] for k in keep if k in os.environ}
+    # Big Picture runs Steam under gamescope without WAYLAND_DISPLAY; redirect
+    # the launcher window into the gamescope session so it is actually visible.
+    if "WAYLAND_DISPLAY" not in env and "GAMESCOPE_WAYLAND_DISPLAY" in os.environ:
+        env["WAYLAND_DISPLAY"] = os.environ["GAMESCOPE_WAYLAND_DISPLAY"]
     env.setdefault("PATH", "/usr/bin:/bin:/usr/local/bin")
     env.setdefault("XDG_DATA_DIRS", "/usr/share:/usr/local/share")
     env.setdefault("HOME", os.path.expanduser("~"))

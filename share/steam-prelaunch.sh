@@ -59,8 +59,22 @@ mkdir -p "$PFX/drive_c"
 # ---------------------------------------------------------------- helpers (lifted from zwift-linux)
 # Wine remembers which Bluetooth MACs the game paired with (system.reg _ORG_BLUEZ_HCI...).
 ble_known() {
+    # grep on the Wine registry is slow (multi-MB file); cache by mtime+size.
+    local cache="$ZWIFT_DATA/.ble-macs" sig
+    sig="$(stat -c '%Y:%s' "$PFX/system.reg" 2>/dev/null)" || return 0
+    if [ -f "$cache.sig" ] && [ "$(cat "$cache.sig" 2>/dev/null)" = "$sig" ] && [ -f "$cache" ]; then
+        cat "$cache"
+        return 0
+    fi
     grep -oiE '_ORG_BLUEZ_HCI[0-9]+&[0-9A-F]{12}' "$PFX/system.reg" 2>/dev/null | grep -oiE '[0-9A-F]{12}$' \
-        | tr 'a-f' 'A-F' | sort -u | sed 's/../&:/g; s/:$//'
+        | tr 'a-f' 'A-F' | sort -u | sed 's/../&:/g; s/:$//' > "$cache.$$"
+    if [ -s "$cache.$$" ]; then
+        printf '%s' "$sig" > "$cache.sig.$$"
+        mv "$cache.$$" "$cache"; mv "$cache.sig.$$" "$cache.sig"
+        cat "$cache"
+    else
+        rm -f "$cache.$$" "$cache.sig.$$"
+    fi
 }
 
 # Release sensors the game paired with in a previous (crashed) session. Touches only those MACs,
