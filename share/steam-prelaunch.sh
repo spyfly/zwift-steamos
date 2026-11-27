@@ -174,18 +174,25 @@ if [ -n "$OFFLINE_HOST" ]; then
     export SSL_CERT_FILE="$ZWIFT_DATA/zwift-server.pem"
 fi
 export ZWIFT_STEAMOS_DATA="$ZWIFT_DATA"
-# Interactive sign-in by default: if no token can be refreshed, the chromium launcher
-# window opens on the Steam session (persistent profile, so Keycloak's SSO cookie is
-# remembered and the next start needs no credentials - like the real launcher).
-# ZWIFT_LOGIN_UI=0 restores the old non-interactive gate (exit 102).
+# Remember the session: try a silent refresh from the stored auth.json FIRST;
+# the chromium launcher window only opens when that fails (first sign-in or an
+# expired refresh token) - like the real launcher, which stays invisible while
+# its session is alive. ZWIFT_LOGIN_UI=0 keeps the old non-interactive gate.
 if [ "${ZWIFT_LOGIN_UI:-1}" = "0" ]; then
-    TOKEN_ARGS="--no-login"
+    if ! python3 -u "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" --no-login >>"$LOG" 2>&1; then
+        log "ERROR: no Zwift sign-in. Run 'zwift login' once (Desktop Mode), then start Zwift again."
+        exit 102
+    fi
 else
-    TOKEN_ARGS="--ui"
-fi
-if ! python3 -u "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" $TOKEN_ARGS >>"$LOG" 2>&1; then
-    log "ERROR: no Zwift sign-in. Run 'zwift login' once (Desktop Mode), then start Zwift again."
-    exit 102
+    if python3 -u "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" --no-login >>"$LOG" 2>&1; then
+        : # silent refresh ok
+    else
+        log "Silent token refresh failed - opening launcher window for sign-in."
+        python3 -u "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" --ui >>"$LOG" 2>&1 || {
+            log "ERROR: no Zwift sign-in. Run 'zwift login' once (Desktop Mode), then start Zwift again."
+            exit 102
+        }
+    fi
 fi
 chmod 600 "$TOKEN_FILE" 2>/dev/null || true
 TOKEN_WIN='C:\zwift-token.json'
