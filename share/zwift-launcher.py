@@ -291,6 +291,11 @@ def ask_code_chromium(url, timeout=None):
                 os.killpg(os.getpgid(proc.pid), 9)
             except (ProcessLookupError, PermissionError):
                 pass
+        # sweep escapees: chrome can leave the process group via the flatpak
+        # wrapper; anything still holding this profile would hand off to and
+        # poison the next launch.
+        subprocess.run(["pkill", "-9", "-f", "user-data-dir=" + profile],
+                       timeout=10, check=False)
 
     try:
         port = None
