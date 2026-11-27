@@ -217,9 +217,9 @@ def _import_remember_cookies(sock):
         with open(path) as f:
             cookies = json.load(f)
     except (OSError, ValueError):
-        return
+        return 0
     if not isinstance(cookies, list):
-        return
+        return 0
     _ws_call(sock, 100, "Network.enable", {})
     mid, ok = 101, 0
     for c in cookies:
@@ -241,7 +241,11 @@ def _import_remember_cookies(sock):
         else:
             sys.stderr.write(f"zwift-launcher: cookie {c.get('name')} not set: {msg}\n")
     sys.stderr.write(f"zwift-launcher: remember cookies imported: {ok}/{len(cookies)}\n")
+    return ok
 
+
+_RIDER_CLICK_JS = ('(() => { const b = document.querySelector("button[name=\\"player_id\\"]");'
+                   ' return b ? (b.click(), "clicked") : "norider"; })()')
 
 _SUCCESS_PAGE = (
     "<html><body style=\"background:#10151d;color:#fc4c02;font-family:sans-serif;"
@@ -381,12 +385,27 @@ def ask_code_chromium(url, timeout=None):
         sock = _ws_connect(target)
         global WS
         WS = sock
-        _import_remember_cookies(sock)
+        _cookie_count = _import_remember_cookies(sock)
         _ws_send(sock, {"id": 1, "method": "Fetch.enable", "params": {"patterns": [
             {"urlPattern": "http://zwift/*"}, {"urlPattern": "http://zwift?*"}]}})
         mid = 1
+        # Auto rider click: with the remember cookie the /login/ page accepts a
+        # single button click as sign-in, so the launcher can do it headlessly -
+        # needed on Big Picture/gamescope where the window is never visible.
+        rider_clicks = 0
+        if _cookie_count:
+            next_click = time.time() + 2.5
+            sock.settimeout(2.5)  # wake the read loop for the click timer
+        else:
+            next_click = time.time() * 2  # never
         deadline = time.time() + timeout
         while time.time() < deadline:
+            if time.time() >= next_click and rider_clicks < 12:
+                _ws_send(sock, {"id": 4000 + rider_clicks, "method": "Runtime.evaluate",
+                                "params": {"expression": _RIDER_CLICK_JS,
+                                           "returnByValue": True}})
+                rider_clicks += 1
+                next_click = time.time() + 2.5
             if proc.poll() is not None:
                 break
             try:
