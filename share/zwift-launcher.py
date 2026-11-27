@@ -189,9 +189,11 @@ def _clean_env():
     minimal, session-correct environment instead."""
     keep = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "DISPLAY", "WAYLAND_DISPLAY",
             "XDG_RUNTIME_DIR", "XDG_SESSION_TYPE", "XDG_SESSION_DESKTOP", "XAUTHORITY",
-            "DBUS_SESSION_BUS_ADDRESS", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "TMPDIR")
-    env = {k: os.environ[k] for k in keep if os.environ.get(k)}
+            "DBUS_SESSION_BUS_ADDRESS", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "TMPDIR",
+            "XDG_DATA_DIRS", "XDG_CONFIG_DIRS")
+    env = {k: os.environ[k] for k in keep if k in os.environ}
     env.setdefault("PATH", "/usr/bin:/bin:/usr/local/bin")
+    env.setdefault("XDG_DATA_DIRS", "/usr/share:/usr/local/share")
     env.setdefault("HOME", os.path.expanduser("~"))
     return env
 
@@ -224,8 +226,10 @@ def _tls_spki_flag():
         der = subprocess.run(["openssl", "pkey", "-pubin", "-outform", "DER"],
                              input=pub.stdout.encode(), capture_output=True,
                              timeout=10, check=True)
+        sha = subprocess.run(["openssl", "dgst", "-sha256", "-binary"],
+                             input=der.stdout, capture_output=True, timeout=10, check=True)
         return ["--ignore-certificate-errors-spki-list="
-                + base64.b64encode(der.stdout).decode()]
+                + base64.b64encode(sha.stdout).decode()]
     except (OSError, subprocess.SubprocessError):
         return []
 
