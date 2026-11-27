@@ -18,3 +18,4 @@ zwift-linux-*.tar.gz
 .DS_Store
 .vscode/
 .idea/
+dist/
