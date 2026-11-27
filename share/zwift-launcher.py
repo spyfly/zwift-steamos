@@ -165,8 +165,17 @@ def _devtools_port(proc, deadline=20.0):
 
 
 def _page_target(port):
-    with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5) as r:
-        targets = json.load(r)
+    # the DevTools line can print before the HTTP listener accepts; poll briefly.
+    end = time.time() + 15
+    while True:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5) as r:
+                targets = json.load(r)
+            break
+        except OSError as e:
+            if time.time() >= end:
+                raise RuntimeError(f"DevTools endpoint unreachable: {e}") from e
+            time.sleep(1.0)
     pages = [t for t in targets if t.get("type") == "page" and t.get("webSocketDebuggerUrl")]
     if not pages:
         raise RuntimeError("no page target in chromium")
