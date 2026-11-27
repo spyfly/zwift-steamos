@@ -160,7 +160,7 @@ if [ ! -f "$GE_DIR/files/lib/wine/x86_64-unix/wine/boot" ] && [ ! -f "$GE_DIR/pr
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
     say "   downloading $GE_VERSION (~560 MB) ..."
-    curl -fL --retry 3 -o "$tmp/ge.tar.gz" "$GE_RELEASE_URL/$GE_VERSION/$GE_VERSION-x86_64.tar.gz" \
+    curl -fL --retry 3 -o "$tmp/$GE_VERSION-x86_64.tar.gz" "$GE_RELEASE_URL/$GE_VERSION/$GE_VERSION-x86_64.tar.gz" \
         || die "GE-Proton download failed"
     curl -fsSL --retry 3 -o "$tmp/ge.sha512sum" "$GE_RELEASE_URL/$GE_VERSION/$GE_VERSION-x86_64.sha512sum" \
         || warn "could not download checksum file - skipping verification"
@@ -168,7 +168,7 @@ if [ ! -f "$GE_DIR/files/lib/wine/x86_64-unix/wine/boot" ] && [ ! -f "$GE_DIR/pr
         (cd "$tmp" && sha512sum -c --quiet ge.sha512sum) || die "GE-Proton download failed its checksum"
         say "   checksum OK"
     fi
-    tar -xzf "$tmp/ge.tar.gz" -C "$tmp"
+    tar -xzf "$tmp/$GE_VERSION-x86_64.tar.gz" -C "$tmp"
     [ -d "$tmp/$GE_VERSION" ] || die "unexpected tarball layout"
     rm -rf "$GE_DIR"
     mv "$tmp/$GE_VERSION" "$GE_DIR"
