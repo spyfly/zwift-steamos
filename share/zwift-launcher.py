@@ -222,6 +222,7 @@ def ask_code_chromium(url, timeout=None):
     args = cmd + ["--app=" + url, "--user-data-dir=" + profile,
                   "--remote-debugging-port=0", "--no-first-run",
                   "--no-default-browser-check", "--window-size=%d,%d" % WINDOW,
+                  "--ozone-platform-hint=auto",
                   "--disable-features=Translate,RendererCodeIntegrity",
                   "--disable-breakpad"]
     proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
