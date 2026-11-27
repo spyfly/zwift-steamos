@@ -31,7 +31,7 @@ LOG="$ZWIFT_DATA/prelaunch.log"
 log() { printf '[zwift-steamos %s] %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$LOG" >&2; }
 mkdir -p "$ZWIFT_DATA"
 
-log "prelaunch: data=$ZWIFT_DATA game=$GAME_DIR offline=${ZWIFT_OFFLINE_HOST:-off}"
+log "prelaunch: data=$ZWIFT_DATA game=$GAME_DIR"
 
 # ---------------------------------------------------------------- Steam/Proton env
 # Steam provides STEAM_COMPAT_DATA_PATH (our prefix lives in $STEAM_COMPAT_DATA_PATH/pfx).
@@ -159,13 +159,18 @@ if [ -f "$GAME_DIR/ZwiftLauncher_ver_cur.xml" ]; then
 fi
 
 TOKEN_FILE="$PFX/drive_c/zwift-token.json"
-if ! python3 "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" --no-login >>"$LOG" 2>&1; then
-    log "ERROR: not signed in. Run 'zwift login' in Desktop Mode, then start Zwift again."
-    exit 102
+if [ -n "$OFFLINE_HOST" ]; then
+    # Offline server handles auth itself (self-signed TLS would fail the Python check anyway).
+    log "Offline mode ($OFFLINE_HOST): skipping sign-in check."
+else
+    if ! python3 "$ZWIFT_DATA/zwift-auth.py" token "$TOKEN_FILE" --no-login >>"$LOG" 2>&1; then
+        log "ERROR: not signed in. Run 'zwift login' in Desktop Mode, then start Zwift again."
+        exit 102
+    fi
+    chmod 600 "$TOKEN_FILE" 2>/dev/null || true
+    log "Sign-in token refreshed for launcher version $LAUNCHER_VERSION."
 fi
-chmod 600 "$TOKEN_FILE" 2>/dev/null || true
 TOKEN_WIN='C:\zwift-token.json'
-log "Sign-in token refreshed for launcher version $LAUNCHER_VERSION."
 
 # ---------------------------------------------------------------- 5. prefs
 apply_prefs

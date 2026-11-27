@@ -355,5 +355,5 @@ fi
 say "Done."
 say "  1. Sign in once:        zwift login        (as $TARGET_USER, Desktop Mode recommended)"
 say "  2. Start Zwift:         Steam library -> Zwift"
-say "  Offline/Zluggish:       Steam library -> 'Zwift (Zluggish)'  (or: zwift zluggish on <ip>)"
+say "  Offline mode:           zwift zluggish --host <ip> --cert <pem>  (zluggish off switches back)"
 say "  Status / diagnostics:   zwift status | zwift doctor"

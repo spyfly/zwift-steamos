@@ -2,6 +2,11 @@
 
 ## 27 November 2026 — zwift-steamos 1.0.0 (SteamOS-native fork)
 
+- **One Steam library shortcut only** ("Zwift"); Zluggish offline mode switches its launch options
+  (`zluggish --host <ip> --cert <pem>` → offline, `zluggish off` → online). Stale "Zwift (Zluggish)"
+  entries from earlier installs are removed automatically.
+- **Prelaunch skips the sign-in token check in offline mode** — the offline server handles auth,
+  and the Python TLS check cannot trust its self-signed certificate.
 - **Steam-native runtime, no umu-launcher.** GE-Proton (default: 11-14) installs into Steam's
   `compatibilitytools.d` as `GE-Proton<ver>-zwift` and is bound to the shortcut through Steam's
   `CompatToolMapping`; Steam owns the wine prefix (`compatdata/<appid>/pfx`). `steam-prelaunch`
