@@ -35,7 +35,11 @@ if _CONNECT_IP:
     _orig_getaddrinfo = _socket.getaddrinfo
 
     def _patched_getaddrinfo(host, *args, **kwargs):
-        return _orig_getaddrinfo(_CONNECT_IP, *args, **kwargs)
+        # only zwift hosts go to the LAN IP; anything else (loopback/devtools,
+        # numeric IPs, unrelated hosts) must resolve normally
+        if isinstance(host, str) and "zwift" in host.lower():
+            return _orig_getaddrinfo(_CONNECT_IP, *args, **kwargs)
+        return _orig_getaddrinfo(host, *args, **kwargs)
 
     _socket.getaddrinfo = _patched_getaddrinfo
 
