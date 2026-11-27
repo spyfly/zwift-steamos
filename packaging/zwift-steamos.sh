@@ -51,8 +51,8 @@ case "$cmd" in
         # Configure the offline (Zluggish) server without reinstalling.
         #   zluggish --host 192.168.30.240 --cert <pem>   enable: cert into the game's CA bundle,
         #                                                 ZWIFT_OFFLINE_DEFAULT into the conf,
-        #                                                 (re)create the "Zwift (Zluggish)" shortcut
-        #   zluggish off                                  disable offline default
+        #                                                 the "Zwift" shortcut switches to offline
+        #   zluggish off                                  disable offline (shortcut back to online)
         # NOTE: inside the flatpak sandbox only $DATA is writable-shared - pass the cert path
         # under ~/.local/share/zwift-steamos/ (e.g. copy it there first).
         [ -f "$DATA/zwift.conf" ] || { echo "not installed yet - run: flatpak run $APP_ID install"; exit 1; }
@@ -67,9 +67,16 @@ case "$cmd" in
         done
         # shellcheck disable=SC1091
         . "$DATA/zwift.conf"   # GAME_DIR, COMPAT_TOOL, ZWIFT_STEAMOS_DATA
+        icon="$DATA/zwift.png"
         if [ "$off" = 1 ]; then
             sed -i '/ZWIFT_OFFLINE_DEFAULT=/d' "$DATA/zwift.conf"
-            echo "offline default disabled (existing 'Zwift (Zluggish)' shortcut still works per-launch)"
+            python3 "$PAYLOAD/share/steam-integration.py" \
+                --exe "$GAME_DIR/LinuxZwiftLauncher.exe" --app-name "Zwift" \
+                --startdir "$GAME_DIR" --icon "$icon" \
+                --compat-tool "${COMPAT_TOOL:-}" \
+                --launch-options "ZWIFT_STEAMOS_DATA=$DATA $DATA/bin/steam-prelaunch %command%" \
+                --description "Zwift cycling app (zwift-steamos)" \
+                && echo "offline mode off ('Zwift' shortcut back to online - restart Steam to pick it up)"
             exit 0
         fi
         [ -n "$host" ] || { echo "usage: flatpak run $APP_ID zluggish --host <ip> --cert <pem>"; exit 1; }
@@ -87,14 +94,13 @@ case "$cmd" in
         fi
         sed -i '/ZWIFT_OFFLINE_DEFAULT=/d' "$DATA/zwift.conf"
         echo "ZWIFT_OFFLINE_DEFAULT=\"$host\"" >> "$DATA/zwift.conf"
-        icon="$DATA/zwift.png"
-        LAUNCH_ZLUG="ZWIFT_STEAMOS_DATA=$DATA ZWIFT_OFFLINE_HOST=$host $DATA/bin/steam-prelaunch %command%"
+        LAUNCH="ZWIFT_STEAMOS_DATA=$DATA ZWIFT_OFFLINE_HOST=$host $DATA/bin/steam-prelaunch %command%"
         python3 "$PAYLOAD/share/steam-integration.py" \
-            --exe "$GAME_DIR/LinuxZwiftLauncher.exe" --app-name "Zwift (Zluggish)" \
+            --exe "$GAME_DIR/LinuxZwiftLauncher.exe" --app-name "Zwift" \
             --startdir "$GAME_DIR" --icon "$icon" \
-            --compat-tool "${COMPAT_TOOL:-}" --launch-options "$LAUNCH_ZLUG" \
-            --description "Zwift via Zluggish offline server" \
-            && echo "offline server configured: $host ('Zwift (Zluggish)' shortcut ready - restart Steam to pick it up)" ;;
+            --compat-tool "${COMPAT_TOOL:-}" --launch-options "$LAUNCH" \
+            --description "Zwift via Zluggish offline server ($host)" \
+            && echo "offline server configured: $host (the 'Zwift' shortcut now starts offline - restart Steam to pick it up; zluggish off switches back)" ;;
     system-setup)
         if [ -f "$DATA/bin/setup-system.sh" ]; then
             echo "One-time root-level setup (udev rules, sudoers, trust anchor, SteamOS /etc persistence):"

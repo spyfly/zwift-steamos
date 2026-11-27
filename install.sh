@@ -306,19 +306,20 @@ if [ "$MAKE_SHORTCUT" = 1 ]; then
     if [ -z "${ZWIFT_FLATPAK:-}" ] && pgrep -u "$TARGET_USER" -x steam >/dev/null 2>&1; then
         warn "Steam is running - it must be restarted to pick up the shortcut (use --restart-steam)"
     fi
-    LAUNCH_BASE="ZWIFT_STEAMOS_DATA=$DATA $BIN_DIR/steam-prelaunch %command%"
+    # ONE library entry; the launch options carry the offline mode (switch via zluggish subcommand)
+    LAUNCH="ZWIFT_STEAMOS_DATA=$DATA $BIN_DIR/steam-prelaunch %command%"
+    DESC="Zwift cycling app (zwift-steamos)"
+    if [ -n "$ZLUGGISH_HOST" ]; then
+        LAUNCH="ZWIFT_STEAMOS_DATA=$DATA ZWIFT_OFFLINE_HOST=$ZLUGGISH_HOST $BIN_DIR/steam-prelaunch %command%"
+        DESC="Zwift via Zluggish offline server ($ZLUGGISH_HOST)"
+    fi
     $SUDO python3 "$HERE/share/steam-integration.py" \
         --exe "$GAME_DIR/LinuxZwiftLauncher.exe" --app-name "Zwift" \
         --startdir "$GAME_DIR" --icon "$ICON" \
-        --compat-tool "$GE_ZWIFT" --launch-options "$LAUNCH_BASE"
-    if [ -n "$ZLUGGISH_HOST" ]; then
-        LAUNCH_ZLUG="ZWIFT_STEAMOS_DATA=$DATA ZWIFT_OFFLINE_HOST=$ZLUGGISH_HOST $BIN_DIR/steam-prelaunch %command%"
-        $SUDO python3 "$HERE/share/steam-integration.py" \
-            --exe "$GAME_DIR/LinuxZwiftLauncher.exe" --app-name "Zwift (Zluggish)" \
-            --startdir "$GAME_DIR" --icon "$ICON" \
-            --compat-tool "$GE_ZWIFT" --launch-options "$LAUNCH_ZLUG" \
-            --description "Zwift via Zluggish offline server"
-    fi
+        --compat-tool "$GE_ZWIFT" --launch-options "$LAUNCH" --description "$DESC"
+    # clean up a stale "Zwift (Zluggish)" entry from older installs
+    $SUDO python3 "$HERE/share/steam-integration.py" \
+        --exe "$GAME_DIR/LinuxZwiftLauncher.exe" --app-name "Zwift (Zluggish)" --remove >/dev/null 2>&1 || true
 else
     warn "--no-shortcut: add the game manually in Steam (Exe: $GAME_DIR/LinuxZwiftLauncher.exe, StartDir: $GAME_DIR)"
 fi
