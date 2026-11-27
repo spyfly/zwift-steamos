@@ -1,482 +1,352 @@
-#!/usr/bin/env bash
-# Zwift for Linux - installer
+#!/bin/bash
+# install.sh — zwift-steamos: Zwift as a native Steam shortcut. Part of zwift-steamos.
+# shellcheck shell=bash
 #
-# Runs the Windows version of Zwift through GE-Proton (via umu-launcher) with
-# direct trainer connections:
-#   * Bluetooth LE  - built into GE-Proton 11-8+, enabled with PROTON_ENABLE_WINEBTH=1
-#   * ANT+ USB      - libusb0.dll bridge shipped in ./ant-libusb (Zwift's ANT driver path -> Linux usbfs)
+# Zwift runs through GE-Proton as a Steam compatibility tool and is started from the Steam UI
+# like any other game: no umu-launcher, no Wine prefix in a private directory, no AppArmor
+# profile. Steam owns the prefix (compatdata), GE-Proton lives in compatibilitytools.d, and a
+# small native pre-launch wrapper does the sign-in token, game updates, Bluetooth preflight and
+# the optional Zluggish offline redirect before Steam starts Proton.
 #
-# Works on any x86_64 distro with glibc, Python 3 (3.10+ without a distro umu-launcher), curl and
-# BlueZ (Arch/CachyOS/Manjaro, Fedora/Nobara/Bazzite, Debian/Ubuntu/Mint/Pop!_OS, openSUSE, SteamOS
-# desktop mode, ...). Nothing is compiled unless you pass --build-starter. Everything goes into your
-# home directory; sudo is only used for optional udev rules (ANT+ stick access, Bluetooth adapter
-# power saving), an AppArmor profile where Ubuntu needs one, and to start the Bluetooth service.
+# Installs (per user):
+#   ~/.local/share/zwift-steamos/            scripts, game files, token, logs
+#   ~/.local/share/Steam/compatibilitytools.d/GE-Proton<ver>-zwift
+#                                            patched GE-Proton (libusb0 bridge for ANT+)
+#   ~/.local/bin/zwift                       CLI (login, update, zluggish, doctor, ...)
+#   Steam shortcuts "Zwift" / "Zwift (Zluggish)" bound to the compat tool
 #
-# Usage: ./install.sh [options]      (run ./install.sh --help)
+# Root-only bits (sudo, optional): udev rules for ANT+ sticks and Bluetooth USB power saving,
+# the Zluggish hosts helper + sudoers rule, and the Zluggish certificate in the trust store.
+#
+# Usage:
+#   ./install.sh [--user NAME] [--data-dir DIR] [--ge-version GE-Proton11-14]
+#                [--zluggish-cert FILE] [--zluggish-host IP] [--no-shortcut]
+#                [--no-ble] [--no-ant] [--restart-steam] [--check-only]
+#
+# Run the sign-in once before the first start:   zwift login
+# Then start Zwift from the Steam UI.
+
 set -euo pipefail
 
-ZL_VERSION="1.1.0"
-GE_VER="GE-Proton11-8"
-UMU_VER="1.4.4"
-UMU_SHA256="eb590691841f7fad3fc3ad8fd5db4ccb87849fe7948e62b28ece7a4ee48cc851"
-ZWIFT_SETUP_URL="https://cdn.zwift.com/app/ZwiftSetup.exe"
+VERSION="2026.11.27-1"
+DEFAULT_GE="GE-Proton11-14"
+GE_RELEASE_URL="https://github.com/GloriousEggroll/proton-ge-custom/releases/download"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DATA="${XDG_DATA_HOME:-$HOME/.local/share}/zwift-linux"
-BIN="$HOME/.local/bin"
-APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
-PFX="${ZWIFT_PREFIX:-$HOME/Games/zwift}"
-SETUP_EXE=""
-DPI="${ZWIFT_DPI:-}"
-RES="${ZWIFT_RESOLUTION:-}"
-USE_SUDO=1 DO_BLE=1 DO_ANT=1 ASSUME_YES=0 CHECK_ONLY=0 BUILD_STARTER="${ZWIFT_BUILD_STARTER:-0}"
 
-usage() {
-  cat <<EOF
-Zwift for Linux installer $ZL_VERSION
-
-  ./install.sh [options]
-
-Options:
-  --prefix DIR     Wine prefix for Zwift (default: ~/Games/zwift, or \$ZWIFT_PREFIX)
-  --setup FILE     Use this ZwiftSetup.exe instead of downloading it
-  --dpi N          Windows DPI for the Zwift prefix (96 = 100%, 144 = 150%, 192 = 200%).
-                   Default: detected from your desktop scale.
-  --resolution R   Resolution Zwift renders at: WxH (e.g. 2560x1440), native (your screen's own
-                   resolution) or auto (let Zwift choose; its GPU detection often stops at 1080p).
-                   Default: native on a new install, otherwise the previous setting.
-  --no-sudo        Skip the steps that need sudo (udev rules, AppArmor profile, Bluetooth service)
-                   and print the commands instead
-  --no-ble         Don't enable Bluetooth LE (use Zwift Companion instead)
-  --no-ant         Don't install the ANT+ USB bridge
-  --build-starter  Build LinuxZwiftLauncher.exe from zwift-start/zwift-start.c instead of using the
-                   prebuilt copy (needs the MinGW-w64 cross compiler, x86_64-w64-mingw32-gcc)
-  -y, --yes        Accepted for scripts; the installer currently asks no questions
-  --check          Only check this PC (distro, Python, sign-in window, Bluetooth, sandbox, display/GPU) and exit
-  -h, --help       This help
-
-Re-running the installer updates an existing install and skips finished steps.
-EOF
-}
-
+# ----------------------------------------------------------------------------- flags
+DATA_DIR="" TARGET_USER="" GE_VERSION="$DEFAULT_GE" RESTART_STEAM=0 CHECK_ONLY=0
+DO_BLE=1 DO_ANT=1 MAKE_SHORTCUT=1
+ZLUGGISH_CERT="" ZLUGGISH_HOST=""
 while [ $# -gt 0 ]; do
-  case "$1" in
-    --prefix) PFX="$2"; shift 2 ;;
-    --setup) SETUP_EXE="$(realpath "$2")"; shift 2 ;;
-    --dpi) DPI="$2"; shift 2 ;;
-    --resolution) RES="$2"; shift 2 ;;
-    --no-sudo) USE_SUDO=0; shift ;;
-    --no-ble) DO_BLE=0; shift ;;
-    --no-ant) DO_ANT=0; shift ;;
-    --build-starter) BUILD_STARTER=1; shift ;;
-    -y|--yes) ASSUME_YES=1; shift ;;
-    --check) CHECK_ONLY=1; shift ;;
-    -h|--help) usage; exit 0 ;;
-    *) echo "Unknown option: $1"; usage; exit 1 ;;
-  esac
-done
-
-c_info=$'\033[1;36m' c_ok=$'\033[1;32m' c_warn=$'\033[1;33m' c_err=$'\033[1;31m' c_off=$'\033[0m'
-step() { printf '\n%s==> %s%s\n' "$c_info" "$*" "$c_off"; }
-ok()   { printf '%s  ok%s %s\n' "$c_ok" "$c_off" "$*"; }
-warn() { printf '%s  warning:%s %s\n' "$c_warn" "$c_off" "$*" >&2; }
-die()  { printf '%sERROR:%s %s\n' "$c_err" "$c_off" "$*" >&2; exit 1; }
-# shellcheck source=/dev/null
-. "$HERE/share/zwift-resolution.sh"
-case "${RES:-}" in ""|native|auto) ;; *) zl_valid_res "$RES" || die "--resolution takes WxH (e.g. 2560x1440), native or auto" ;; esac
-interactive() { [ "$ASSUME_YES" = 0 ] && [ -t 0 ]; }
-
-# ---------------------------------------------------------------------------------------------
-step "Checking your system"
-[ "$(uname -m)" = x86_64 ] || die "Zwift for Windows needs an x86_64 PC (found $(uname -m))."
-[ "$(id -u)" != 0 ] || die "Run this as your normal user, not root (sudo is requested only where needed)."
-for t in curl tar sha256sum sha512sum awk sed grep python3; do
-  command -v "$t" >/dev/null || die "Missing required tool: $t"
-done
-if [ "$CHECK_ONLY" = 0 ] && pgrep -f 'Zwift(App|Launcher)\.exe' >/dev/null 2>&1; then
-  die "Zwift is running. Quit it (and its tray icon), then run the installer again."
-fi
-DISTRO_ID="unknown" DISTRO_LIKE="" DISTRO_NAME="Linux"
-if [ -r /etc/os-release ]; then
-  # shellcheck disable=SC1091
-  . /etc/os-release
-  DISTRO_ID="${ID:-unknown}" DISTRO_LIKE="${ID_LIKE:-}" DISTRO_NAME="${PRETTY_NAME:-$DISTRO_ID}"
-fi
-ok "$DISTRO_NAME, kernel $(uname -r)"
-
-pkg_hint() { # pkg_hint <generic package name> -> install command for this distro
-  case " $DISTRO_ID $DISTRO_LIKE " in
-    *" arch "*|*" cachyos "*|*" manjaro "*|*" endeavouros "*) echo "sudo pacman -S --needed $1" ;;
-    *" fedora "*|*" rhel "*|*" nobara "*|*" bazzite "*) echo "sudo dnf install $1" ;;
-    *" debian "*|*" ubuntu "*) echo "sudo apt install $1" ;;
-    *" opensuse"*|*" suse "*) echo "sudo zypper install $1" ;;
-    *" steamos "*) echo "(SteamOS) $1 is preinstalled" ;;
-    *) echo "install the '$1' package with your package manager" ;;
-  esac
-}
-
-# Ubuntu 23.10+ (AppArmor) lets unprivileged programs create user namespaces only with a profile that
-# allows it. umu's Steam Linux Runtime container (pressure-vessel / bwrap) needs one, like Steam's own.
-APPARMOR_FILE=/etc/apparmor.d/zwift-linux-umu
-APPARMOR_PROFILE='abi <abi/4.0>,
-include <tunables/global>
-profile zwift-linux-umu @{HOME}/.local/share/umu/**/srt-bwrap flags=(unconfined) {
-  userns,
-  include if exists <local/zwift-linux-umu>
-}'
-userns_restricted() { [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null)" = 1 ]; }
-
-if [ "$CHECK_ONLY" = 1 ]; then
-  step "Prerequisites"
-  if command -v umu-run >/dev/null; then ok "umu-launcher from your distro: $(command -v umu-run)"
-  elif python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null; then ok "$(python3 -V) (umu-launcher zipapp will be downloaded)"
-  else warn "no umu-launcher and no Python 3.10+: $(pkg_hint python3)"; fi
-  if python3 -c 'import gi; gi.require_version("Gtk", "4.0"); gi.require_version("WebKit", "6.0"); from gi.repository import Gtk, WebKit' 2>/dev/null; then
-    ok "WebKitGTK 6: Zwift sign-in opens in its own window"
-  else
-    note_pkg="python3-gobject + webkitgtk-6.0"
-    case " $DISTRO_ID $DISTRO_LIKE " in
-      *" debian "*|*" ubuntu "*) note_pkg="python3-gi gir1.2-webkit-6.0" ;;
-      *" fedora "*|*" rhel "*) note_pkg="python3-gobject webkitgtk6.0" ;;
-      *" arch "*|*" cachyos "*|*" manjaro "*|*" endeavouros "*) note_pkg="python-gobject webkitgtk-6.0" ;;
-      *" opensuse"*|*" suse "*) note_pkg="python3-gobject typelib-1_0-WebKit-6_0" ;;
+    case "$1" in
+        --user) TARGET_USER="${2:?}"; shift 2 ;;
+        --data-dir) DATA_DIR="${2:?}"; shift 2 ;;
+        --ge-version) GE_VERSION="${2:?}"; shift 2 ;;
+        --zluggish-cert) ZLUGGISH_CERT="${2:?}"; shift 2 ;;
+        --zluggish-host) ZLUGGISH_HOST="${2:?}"; shift 2 ;;
+        --no-shortcut) MAKE_SHORTCUT=0; shift ;;
+        --no-ble) DO_BLE=0; shift ;;
+        --no-ant) DO_ANT=0; shift ;;
+        --restart-steam) RESTART_STEAM=1; shift ;;
+        --check-only) CHECK_ONLY=1; shift ;;
+        -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "unknown flag: $1 (try --help)" >&2; exit 1 ;;
     esac
-    warn "no WebKitGTK 6 for Python: sign-in will use your web browser instead (optional: $(pkg_hint "$note_pkg"))"
-  fi
-  if command -v bluetoothctl >/dev/null; then ok "BlueZ $(bluetoothctl --version 2>/dev/null | awk '{print $2}')"
-  else warn "BlueZ not found, needed for Bluetooth sensors: $(pkg_hint bluez)"; fi
-  if userns_restricted; then
-    if [ -f "$APPARMOR_FILE" ]; then ok "AppArmor user-namespace profile for umu present"
-    else warn "AppArmor restricts user namespaces; install.sh will add $APPARMOR_FILE (sudo) so umu's container can start"; fi
-  elif command -v unshare >/dev/null && ! unshare -Ur true 2>/dev/null; then
-    warn "unprivileged user namespaces are disabled; umu's container (and Steam's) can't start"
-  else ok "user namespaces available (umu container)"; fi
-  # shellcheck source=/dev/null
-  DATA="$DATA" . "$HERE/share/zwift-display.sh"
-  zl_pick_display
-  ok "$(zl_session) session, GPU driver $(zl_gpu_driver)$( [ -n "$(zl_nvidia_major)" ] && echo " $(cat /sys/module/nvidia/version)"): Wine $ZL_DISPLAY driver ($ZL_DISPLAY_WHY)"
-  nr="$(zl_native_res)"
-  if [ -n "$nr" ]; then ok "screen resolution $nr: Zwift will render at it (--resolution to change)"
-  else warn "screen resolution not detected; Zwift will choose its own (or pass --resolution WxH)"; fi
-  exit 0
-fi
-
-# ---------------------------------------------------------------------------------------------
-step "1/7 umu-launcher (runs Proton outside Steam)"
-mkdir -p "$DATA"
-if command -v umu-run >/dev/null; then
-  UMU="$(command -v umu-run)"
-  ok "using your distro's umu-launcher: $UMU"
-else
-  UMU="$DATA/umu/umu-run"
-  if [ ! -x "$UMU" ] || [ "$(cat "$DATA/umu/.version" 2>/dev/null)" != "$UMU_VER" ]; then
-    command -v python3 >/dev/null || die "Python 3 is needed for umu-launcher: $(pkg_hint python3)"
-    python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' \
-      || die "umu-launcher needs Python 3.10 or newer (found $(python3 -V 2>&1))"
-    tmp="$(mktemp -d)"
-    curl -fL --progress-bar -o "$tmp/umu.tar" \
-      "https://github.com/Open-Wine-Components/umu-launcher/releases/download/$UMU_VER/umu-launcher-$UMU_VER-zipapp.tar"
-    echo "$UMU_SHA256  $tmp/umu.tar" | sha256sum -c --quiet - || die "umu-launcher download failed its checksum"
-    rm -rf "$DATA/umu" && tar -xf "$tmp/umu.tar" -C "$DATA" && rm -rf "$tmp"
-    echo "$UMU_VER" > "$DATA/umu/.version"
-  fi
-  ok "umu-launcher $UMU_VER (zipapp) in $DATA/umu"
-fi
-
-# ---------------------------------------------------------------------------------------------
-step "2/7 $GE_VER (Proton with Bluetooth LE support)"
-GE="$DATA/$GE_VER-x86_64"
-if [ ! -x "$GE/proton" ]; then
-  base="https://github.com/GloriousEggroll/proton-ge-custom/releases/download/$GE_VER"
-  tmp="$(mktemp -d -p "$DATA")"
-  curl -fL --progress-bar -o "$tmp/$GE_VER-x86_64.tar.gz" "$base/$GE_VER-x86_64.tar.gz"
-  curl -fsSL -o "$tmp/$GE_VER-x86_64.sha512sum" "$base/$GE_VER-x86_64.sha512sum"
-  (cd "$tmp" && sha512sum -c --quiet "$GE_VER-x86_64.sha512sum") || die "$GE_VER download failed its checksum"
-  tar -xzf "$tmp/$GE_VER-x86_64.tar.gz" -C "$DATA" && rm -rf "$tmp"
-  [ -x "$GE/proton" ] || die "unexpected $GE_VER archive layout"
-fi
-grep -q PROTON_ENABLE_WINEBTH "$GE/proton" || warn "$GE_VER has no PROTON_ENABLE_WINEBTH switch; Bluetooth LE will not work"
-ok "$(awk '{print $2}' "$GE/version" 2>/dev/null || echo "$GE_VER") in $GE"
-
-# ---------------------------------------------------------------------------------------------
-step "3/7 ANT+ USB bridge"
-if [ "$DO_ANT" = 1 ]; then
-  for f in x86_64-windows/libusb0.dll x86_64-unix/libusb0.so placeholder/libusb0.dll; do
-    [ -f "$HERE/ant-libusb/build/$f" ] || die "missing $HERE/ant-libusb/build/$f (incomplete package?)"
-  done
-  (cd "$HERE/ant-libusb" && sha256sum -c --quiet SHA256SUMS) \
-    || die "ant-libusb binaries don't match ant-libusb/SHA256SUMS (rebuild them from ant-libusb/src, see ant-libusb/README.md)"
-  install -m 644 "$HERE/ant-libusb/build/x86_64-windows/libusb0.dll" "$GE/files/lib/wine/x86_64-windows/libusb0.dll"
-  install -m 755 "$HERE/ant-libusb/build/x86_64-unix/libusb0.so"     "$GE/files/lib/wine/x86_64-unix/libusb0.so"
-  install -Dm 644 "$HERE/ant-libusb/build/placeholder/libusb0.dll"   "$DATA/libusb0-placeholder.dll"
-  install -Dm 644 "$HERE/ant-libusb/test/antprobe.exe"               "$DATA/antprobe.exe"
-  ok "libusb0.dll bridge installed into $GE_VER"
-else
-  ok "skipped (--no-ant)"
-fi
-# Wine's Bluetooth driver with a retry for heart-rate notifications (see wine-patches/README.md).
-WINEBTH_ORIG_SHA=54e85a75a9ed092a548a97204dc2f0a99bb5c7a48ce5a3f9b503887b84c4a3f2
-WINEBTH="$GE/files/lib/wine/x86_64-unix/winebth.so"
-if [ "$DO_BLE" = 1 ] && [ -f "$HERE/wine-patches/winebth.so" ] && [ -f "$WINEBTH" ]; then
-  (cd "$HERE/wine-patches" && sha256sum -c --quiet SHA256SUMS) || die "wine-patches/winebth.so doesn't match wine-patches/SHA256SUMS"
-  have="$(sha256sum "$WINEBTH" | cut -d' ' -f1)"
-  if [ "$have" = "$WINEBTH_ORIG_SHA" ]; then
-    cp -f "$WINEBTH" "$WINEBTH.orig"
-    install -m 755 "$HERE/wine-patches/winebth.so" "$WINEBTH"
-    ok "Bluetooth driver with heart-rate notify retry installed (original kept as winebth.so.orig)"
-  elif cmp -s "$WINEBTH" "$HERE/wine-patches/winebth.so"; then
-    ok "Bluetooth driver with heart-rate notify retry already installed"
-  else
-    warn "$WINEBTH is not the GE-Proton 11-8 build; leaving it unpatched"
-  fi
-fi
-
-# ---------------------------------------------------------------------------------------------
-step "4/7 System setup (USB permission for ANT+ sticks, Bluetooth service)"
-UDEV_RULE='SUBSYSTEM=="usb", ATTRS{idVendor}=="0fcf", ATTRS{idProduct}=="1008|1009", MODE="0666", TAG+="uaccess"'
-UDEV_FILE=/etc/udev/rules.d/51-zwift-ant-usb.rules
-manual=()
-if [ "$DO_ANT" = 1 ] && [ "$(cat "$UDEV_FILE" 2>/dev/null)" != "$UDEV_RULE" ]; then
-  if [ "$USE_SUDO" = 1 ] && command -v sudo >/dev/null; then
-    echo "  Adding $UDEV_FILE so your user can use ANT+ USB sticks (sudo):"
-    if echo "$UDEV_RULE" | sudo tee "$UDEV_FILE" >/dev/null; then
-      sudo udevadm control --reload-rules || true
-      sudo udevadm trigger --subsystem-match=usb --attr-match=idVendor=0fcf || true
-      ok "udev rule installed"
-    else
-      warn "could not write $UDEV_FILE"; manual+=("echo '$UDEV_RULE' | sudo tee $UDEV_FILE && sudo udevadm control --reload-rules && sudo udevadm trigger")
-    fi
-  else
-    manual+=("echo '$UDEV_RULE' | sudo tee $UDEV_FILE && sudo udevadm control --reload-rules && sudo udevadm trigger")
-  fi
-elif [ "$DO_ANT" = 1 ]; then ok "udev rule already present"; fi
-
-if userns_restricted && [ "$(cat "$APPARMOR_FILE" 2>/dev/null)" != "$APPARMOR_PROFILE" ]; then
-  if [ "$USE_SUDO" = 1 ] && command -v sudo >/dev/null; then
-    echo "  Adding $APPARMOR_FILE so umu's container may use user namespaces (sudo):"
-    if printf '%s\n' "$APPARMOR_PROFILE" | sudo tee "$APPARMOR_FILE" >/dev/null && sudo apparmor_parser -r "$APPARMOR_FILE"; then
-      ok "AppArmor profile installed"
-    else warn "could not load $APPARMOR_FILE; umu may fail with 'bwrap: setting up uid map: Permission denied'"; fi
-  else
-    manual+=("printf '%s\\n' '$APPARMOR_PROFILE' | sudo tee $APPARMOR_FILE && sudo apparmor_parser -r $APPARMOR_FILE")
-  fi
-fi
-
-# USB autosuspend on Bluetooth adapters (btusb enable_autosuspend=Y on most distros) can make the controller
-# drop BLE links mid-ride ("ACL packet for unknown connection handle" in dmesg); keep USB adapters awake.
-BT_RULE='ACTION=="bind", SUBSYSTEM=="usb", DRIVER=="btusb", RUN+="/bin/sh -c '"'"'echo on > /sys%p/../power/control'"'"'"'
-BT_RULE_FILE=/etc/udev/rules.d/52-zwift-bluetooth-awake.rules
-if [ "$DO_BLE" = 1 ] && [ "$(cat "$BT_RULE_FILE" 2>/dev/null)" != "$BT_RULE" ]; then
-  if [ "$USE_SUDO" = 1 ] && command -v sudo >/dev/null; then
-    echo "  Adding $BT_RULE_FILE to turn off USB power saving for Bluetooth adapters (sudo):"
-    if echo "$BT_RULE" | sudo tee "$BT_RULE_FILE" >/dev/null; then
-      sudo udevadm control --reload-rules || true
-      for d in /sys/class/bluetooth/hci*/device/..; do   # apply now, without replugging
-        [ -f "$d/power/control" ] && echo on | sudo tee "$d/power/control" >/dev/null
-      done
-      ok "Bluetooth adapter kept awake"
-    else warn "could not write $BT_RULE_FILE"; fi
-  else
-    manual+=("sudo tee $BT_RULE_FILE <<'RULE'
-$BT_RULE
-RULE
-sudo udevadm control --reload-rules")
-  fi
-fi
-
-if [ "$DO_BLE" = 1 ]; then
-  if ! command -v bluetoothctl >/dev/null && ! systemctl list-unit-files bluetooth.service >/dev/null 2>&1; then
-    warn "BlueZ (the Linux Bluetooth stack) was not found: $(pkg_hint bluez)"
-  elif command -v systemctl >/dev/null && ! systemctl is-active --quiet bluetooth 2>/dev/null; then
-    if [ "$USE_SUDO" = 1 ] && command -v sudo >/dev/null; then
-      sudo systemctl enable --now bluetooth && ok "Bluetooth service started" || warn "could not start bluetooth.service"
-    else
-      manual+=("sudo systemctl enable --now bluetooth")
-    fi
-  else
-    ok "Bluetooth service is running"
-  fi
-fi
-
-# ---------------------------------------------------------------------------------------------
-step "5/7 Wine prefix $PFX (first run installs .NET 4.8, fonts and WebView2 - this takes a while)"
-export WINEPREFIX="$PFX" PROTONPATH="$GE" GAMEID="umu-zwift" PROTON_VERB=waitforexitandrun
-export PROTON_USE_XALIA=0 WINEDLLOVERRIDES="libusb0=b;vccorlib140=n,b;winemenubuilder.exe=d"
-mkdir -p "$PFX"
-
-# Installs made with older scripts linked Bluetooth modules from an older GE-Proton into the prefix:
-# point those links at the current runner and drop the old runner.
-for old in "$DATA"/GE-Proton*-x86_64; do
-  [ -d "$old" ] && [ "$old" != "$GE" ] || continue
-  while IFS= read -r -d '' link; do
-    tgt="$(readlink "$link")"; rel="${tgt#"$old"/}"
-    if [ -e "$GE/$rel" ]; then ln -sfn "$GE/$rel" "$link"; else rm -f "$link"; fi
-  done < <(find "$PFX/drive_c/windows" -maxdepth 3 -type l -lname "$old/*" -print0 2>/dev/null)
-  echo "  removing old runner $(basename "$old")"; rm -rf "$old"
 done
 
-# The umu-zwift protonfix (part of GE-Proton) installs corefonts, dotnet48, d3dcompiler_47 and
-# webview2 the first time anything runs with GAMEID=umu-zwift.
-if [ ! -f "$PFX/.zwift-linux" ] && [ ! -f "$PFX/.zwift-linux-deps" ]; then
-  echo "  (a 'rundll32.exe - This application could not be started' box may appear: click No)"
-  "$UMU" wineboot -u || warn "prefix setup returned an error"
-  [ -d "$PFX/drive_c/windows/system32" ] || die "umu-launcher could not create the prefix. It needs internet access to repo.steampowered.com on first run (it downloads the Steam Linux Runtime); see the messages above."
-  echo "$ZL_VERSION" > "$PFX/.zwift-linux"
-fi
-ok "prefix ready"
+say()  { printf '\033[1;32m==\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m!!\033[0m %s\n' "$*"; }
+die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-detect_dpi() {
-  local s="" d=""
-  # KDE Plasma. Only in a Plasma session: kscreen-doctor installed without a running KScreen
-  # service waits forever for it (issue #2), so check the desktop and cap the call at 5 s.
-  if command -v kscreen-doctor >/dev/null && [[ ":${XDG_CURRENT_DESKTOP:-}:" == *:KDE:* || "${KDE_FULL_SESSION:-}" = true ]]; then
-    s="$(timeout 5 kscreen-doctor -o </dev/null 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -o 'Scale: *[0-9.]*' | head -1 | awk '{print $2}')"
-  fi
-  if [ -z "$s" ] && command -v xrdb >/dev/null && [ -n "${DISPLAY:-}" ]; then   # X11 / XWayland Xft.dpi
-    d="$(xrdb -query 2>/dev/null | awk '/^Xft.dpi:/{print int($2); exit}')"
-  fi
-  if [ -z "$s" ] && [ -z "$d" ] && command -v gsettings >/dev/null; then       # GNOME integer scaling
-    s="$(gsettings get org.gnome.desktop.interface scaling-factor 2>/dev/null | awk '{print $2}')"
-    [ "$s" = 0 ] && s=""
-  fi
-  [ -n "$s" ] && d="$(awk -v s="$s" 'BEGIN{printf "%d", 96*s+0.5}')"
-  echo "$d"
-}
-[ -n "$DPI" ] || DPI="$(detect_dpi)"
-if [[ "$DPI" =~ ^[0-9]+$ ]] && [ "$DPI" -ge 96 ] && [ "$DPI" -le 480 ]; then
-  "$UMU" reg add 'HKCU\Control Panel\Desktop' /v LogPixels /t REG_DWORD /d "$DPI" /f >/dev/null 2>&1 \
-    && ok "Windows DPI set to $DPI ($((DPI * 100 / 96))%)" || warn "could not set DPI"
+# ----------------------------------------------------------------------------- target user
+if [ "$(id -u)" = 0 ]; then
+    TARGET_USER="${TARGET_USER:-${SUDO_USER:-}}"
+    [ -n "$TARGET_USER" ] || die "running as root: pass --user NAME (the Steam user, e.g. deck)"
+    TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+    [ -n "$TARGET_HOME" ] || die "no such user: $TARGET_USER"
+    SUDO="sudo -u $TARGET_USER"
+    AS_ROOT=1
 else
-  echo "  DPI not detected; to set it, re-run with --dpi 144 (150%) or --dpi 192 (200%)"
+    TARGET_USER="$(id -un)"
+    TARGET_HOME="$HOME"
+    SUDO=""
+    AS_ROOT=0
 fi
-# Without these, .NET offers only SSL3/TLS 1.0 and Zwift's servers refuse the launcher's HTTPS calls
-# ("Could not create SSL/TLS secure channel"). Set in both the 64-bit and 32-bit registry views.
-tls_ok=1
-for k in 'HKLM\SOFTWARE\Microsoft\.NETFramework\v4.0.30319' 'HKLM\SOFTWARE\Wow6432Node\Microsoft\.NETFramework\v4.0.30319'; do
-  for v in SchUseStrongCrypto SystemDefaultTlsVersions; do
-    "$UMU" reg add "$k" /v "$v" /t REG_DWORD /d 1 /f >/dev/null 2>&1 || tls_ok=0
-  done
-done
-[ "$tls_ok" = 1 ] && ok ".NET allowed to use TLS 1.2+" || warn "could not set the .NET TLS registry keys"
-[ "$DO_ANT" = 1 ] && install -Dm 644 "$DATA/libusb0-placeholder.dll" "$PFX/drive_c/windows/system32/libusb0.dll"
+DATA="${DATA_DIR:-$TARGET_HOME/.local/share/zwift-steamos}"
+STEAM_ROOT="$TARGET_HOME/.local/share/Steam"
+[ -d "$STEAM_ROOT" ] || STEAM_ROOT="$TARGET_HOME/.steam/root"
+[ -d "$STEAM_ROOT" ] || die "Steam client directory not found under $TARGET_HOME - start Steam once first"
+GAME_DIR="$DATA/game"
+BIN_DIR="$DATA/bin"
+COMPAT_DIR="$STEAM_ROOT/compatibilitytools.d"
+GE_DIR="$COMPAT_DIR/$GE_VERSION-zwift"
+GE_ZWIFT="$GE_VERSION-zwift"
 
-# ---------------------------------------------------------------------------------------------
-step "6/7 Zwift"
-ZDIR="$PFX/drive_c/Program Files (x86)/Zwift"
-if [ -f "$ZDIR/ZwiftLauncher.exe" ]; then
-  ok "Zwift launcher already installed"
-else
-  if [ -z "$SETUP_EXE" ]; then
-    for c in "$HERE/ZwiftSetup.exe" "$HOME/Downloads/ZwiftSetup.exe"; do [ -f "$c" ] && SETUP_EXE="$c" && break; done
-  fi
-  if [ -z "$SETUP_EXE" ]; then
-    SETUP_EXE="$DATA/ZwiftSetup.exe"
-    curl -fL --progress-bar -o "$SETUP_EXE" "$ZWIFT_SETUP_URL" \
-      || die "could not download ZwiftSetup.exe - download it from zwift.com and pass --setup FILE"
-  fi
-  echo "  Installing the Zwift launcher from $SETUP_EXE"
-  ( "$UMU" "$SETUP_EXE" /SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL >"$DATA/install-zwift.log" 2>&1 ) &
-  UMU_PID=$!
-  # The installer starts the WebView2 launcher when it's done; zwift doesn't need it, so stop the prefix
-  # once the launcher files are in place and fetch the game directly instead.
-  for _ in $(seq 1 360); do
-    [ -f "$ZDIR/ZwiftLauncher.exe" ] && { sleep 15; break; }
-    kill -0 "$UMU_PID" 2>/dev/null || break
-    sleep 5
-  done
-  "$GE/files/bin/wineserver" -k 2>/dev/null || true
-  wait "$UMU_PID" 2>/dev/null || true
-  [ -f "$ZDIR/ZwiftLauncher.exe" ] || die "Zwift did not install - see $DATA/install-zwift.log"
-  ok "Zwift launcher installed"
+say "zwift-steamos $VERSION -> user $TARGET_USER, data $DATA"
+if [ -n "${ZWIFT_FLATPAK:-}" ]; then
+    say "running inside the zwift-steamos flatpak (system-level bits go to setup-system.sh)"
 fi
-echo "  Downloading or updating the game from Zwift's servers (about 5 GB the first time)"
-python3 "$HERE/share/zwift-fetch-game.py" "$ZDIR" --if-outdated \
-  && ok "Zwift game files up to date" || die "game download failed - re-run install.sh to resume"
-# Zwift's installer copies the Windows libusb0.dll (needs a kernel driver Wine can't load); keep the bridge.
-[ "$DO_ANT" = 1 ] && install -Dm 644 "$DATA/libusb0-placeholder.dll" "$PFX/drive_c/windows/system32/libusb0.dll"
+for t in curl tar sha256sum sha512sum python3; do command -v "$t" >/dev/null || die "missing tool: $t"; done
+[ -f "$HERE/zwift-start/LinuxZwiftLauncher.exe" ] || die "repo incomplete: zwift-start/LinuxZwiftLauncher.exe missing"
+[ -f "$HERE/ant-libusb/build/x86_64-unix/libusb0.so" ] || die "repo incomplete: ant-libusb/build/* missing (see ant-libusb/README.md)"
+[ "$CHECK_ONLY" = 1 ] && { say "check-only: preflight OK (GE-Proton $GE_VERSION, data $DATA)"; exit 0; }
 
-# ---------------------------------------------------------------------------------------------
-step "7/7 'zwift' command and app menu entry"
-mkdir -p "$BIN" "$APPS"
-# leftovers from the earlier zwift-setup.sh
-grep -qs 'Windows build via GE-Proton' "$APPS/zwift.desktop" && rm -f "$APPS/zwift.desktop"
-rm -rf "$DATA/ble-patch"
-[ -f "$BIN/zwift" ] && [ ! -L "$BIN/zwift" ] && grep -qs 'generated by zwift-setup.sh' "$BIN/zwift" && rm -f "$BIN/zwift"
-install -m 755 "$HERE/share/zwift-launcher.sh" "$DATA/zwift-launcher.sh"
-install -m 755 "$HERE/share/zwift-doctor.sh" "$DATA/zwift-doctor.sh"
-install -m 644 "$HERE/share/zwift-display.sh" "$DATA/zwift-display.sh"
-install -m 644 "$HERE/share/zwift-resolution.sh" "$DATA/zwift-resolution.sh"
-install -m 755 "$HERE/share/zwift-fetch-game.py" "$DATA/zwift-fetch-game.py"
-install -m 755 "$HERE/share/zwift-auth.py" "$DATA/zwift-auth.py"
-install -m 755 "$HERE/tools/ble-hr-hold.py" "$DATA/ble-hr-hold.py"
-install -m 755 "$HERE/tools/zwift-window.py" "$DATA/zwift-window.py"
-# The game starter: prebuilt by default, or built here from its source with --build-starter.
-if [ "$BUILD_STARTER" = 1 ]; then
-  if ! command -v x86_64-w64-mingw32-gcc >/dev/null; then
-    case " $DISTRO_ID $DISTRO_LIKE " in
-      *" arch "*|*" cachyos "*|*" manjaro "*|*" endeavouros "*) mingw_pkg="mingw-w64-gcc" ;;
-      *" fedora "*|*" rhel "*|*" nobara "*|*" bazzite "*) mingw_pkg="mingw64-gcc" ;;
-      *" debian "*|*" ubuntu "*) mingw_pkg="gcc-mingw-w64-x86-64" ;;
-      *" opensuse"*|*" suse "*) mingw_pkg="mingw64-cross-gcc" ;;
-      *) mingw_pkg="mingw-w64 (x86_64 cross compiler)" ;;
-    esac
-    die "--build-starter needs x86_64-w64-mingw32-gcc: $(pkg_hint "$mingw_pkg")"
-  fi
-  x86_64-w64-mingw32-gcc -municode -O2 -s -Wl,--subsystem,windows \
-    -o "$DATA/LinuxZwiftLauncher.exe" "$HERE/zwift-start/zwift-start.c" || die "building LinuxZwiftLauncher.exe failed"
-  ok "LinuxZwiftLauncher.exe built from zwift-start/zwift-start.c"
+# ----------------------------------------------------------------------------- 1/6 files
+say "1/6 Installing scripts into $DATA"
+mkdir -p "$DATA" "$BIN_DIR" "$GAME_DIR"
+install -m 755 "$HERE/share/steam-prelaunch.sh"        "$BIN_DIR/steam-prelaunch"
+install -m 755 "$HERE/share/zwift-cli.sh"              "$BIN_DIR/zwift"
+install -m 755 "$HERE/share/zwift-doctor.sh"           "$BIN_DIR/zwift-doctor"
+install -m 644 "$HERE/share/zwift-auth.py"             "$DATA/zwift-auth.py"
+install -m 644 "$HERE/share/zwift-fetch-game.py"       "$DATA/zwift-fetch-game.py"
+mkdir -p "$DATA/vdf"
+cp -f "$HERE/share/vdf/__init__.py" "$HERE/share/vdf/vdict.py" "$DATA/vdf/"
+install -m 644 "$HERE/share/zwift-resolution.sh"       "$DATA/zwift-resolution.sh"
+install -m 644 "$HERE/share/zwift-display.sh"          "$DATA/zwift-display.sh"
+install -m 755 "$HERE/zwift-start/LinuxZwiftLauncher.exe" "$GAME_DIR/LinuxZwiftLauncher.exe"
+mkdir -p "$TARGET_HOME/.local/bin"
+if [ -n "${ZWIFT_FLATPAK:-}" ]; then
+    warn "flatpak mode: the CLI runs as  flatpak run io.github.spyfly.zwift-steamos  (no ~/.local/bin symlink)"
 else
-  (cd "$HERE/zwift-start" && sha256sum -c --quiet SHA256SUMS) || die "zwift-start/LinuxZwiftLauncher.exe doesn't match SHA256SUMS (use --build-starter to build it from source)"
-  install -m 644 "$HERE/zwift-start/LinuxZwiftLauncher.exe" "$DATA/LinuxZwiftLauncher.exe"
-  ok "LinuxZwiftLauncher.exe (prebuilt, sha256 $(sha256sum "$DATA/LinuxZwiftLauncher.exe" | cut -c1-16)...; --build-starter builds it from source)"
+    ln -sfn "$BIN_DIR/zwift" "$TARGET_HOME/.local/bin/zwift"
 fi
-rm -f "$DATA/zwift-start.exe"   # old name; ZwiftApp only accepts a parent whose path contains ZwiftLauncher.exe
-# Zwift's GPU detection under Wine often stops at 1080p; render at the screen's own resolution instead.
-[ -n "$RES" ] || RES="$(sed -n 's/^RESOLUTION="\(.*\)"$/\1/p' "$DATA/zwift.conf" 2>/dev/null || true)"
-[ -n "$RES" ] || RES=native
-if [ "$RES" = native ]; then
-  RES="$(zl_native_res)"
-  [ -n "$RES" ] || { RES=auto; warn "screen resolution not detected; Zwift will choose its own (re-run with --resolution WxH)"; }
+
+# A simple icon so the library entry does not look like a broken puzzle piece.
+if [ -f "$HERE/share/app-icon.png" ]; then
+    install -m 644 "$HERE/share/app-icon.png" "$DATA/zwift.png"
+else
+    ZP_OUT="$DATA/zwift.png" python3 - <<'EOF' || ICON=""
+import struct, zlib, os
+W = H = 256
+px = bytearray()
+for y in range(H):
+    for x in range(W):
+        r = min(x, y, W-1-x, H-1-y)
+        inside = r >= 10
+        on_z = (40 < x < 216) and (40 < y < 216) and (
+            (y < 78) or (y > 178) or (abs((x - 40) - (y - 40)) < 26 and y < 140) or (abs((x - 216) + (y - 116)) < 26 and y >= 116)
+        )
+        if not inside: px += bytes((0, 0, 0, 0))
+        elif on_z:     px += bytes((255, 255, 255, 255))
+        else:          px += bytes((252, 108, 3, 255))
+def chunk(tag, data):
+    c = tag + data
+    return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c))
+png = (b'\x89PNG\r\n\x1a\n'
+       + chunk(b'IHDR', struct.pack('>IIBBBBB', W, H, 8, 6, 0, 0, 0))
+       + chunk(b'IDAT', zlib.compress(bytes(px)))
+       + chunk(b'IEND', b''))
+open(os.environ['ZP_OUT'], 'wb').write(png)
+EOF
+ICON="$DATA/zwift.png"
 fi
-if [ "$RES" = auto ]; then ok "Zwift chooses its own resolution"
-else ok "Zwift will render at $RES (change: zwift set-resolution WxH; undo: zwift reset-resolution)"; fi
-cat > "$DATA/zwift.conf" <<EOF
-# written by zwift-linux $ZL_VERSION installer - re-run install.sh to change
-ZL_VERSION="$ZL_VERSION"
-UMU="$UMU"
-GE="$GE"
-PFX="$PFX"
+
+CONF="$DATA/zwift.conf"
+cat > "$CONF" <<EOF
+# Written by install.sh. Sourced by the pre-launch wrapper and the zwift CLI.
+ZWIFT_STEAMOS_DATA="$DATA"
+GAME_DIR="$GAME_DIR"
+GE_VERSION="$GE_VERSION"
+COMPAT_TOOL="$GE_ZWIFT"
 DO_BLE=$DO_BLE
-DO_ANT=$DO_ANT
-DPI="$DPI"
-RESOLUTION="$RES"
+RESOLUTION="auto"
 EOF
-ln -sfn "$DATA/zwift-launcher.sh" "$BIN/zwift"
-icon="applications-games"
-[ -f "$HERE/share/zwift-linux.svg" ] && install -Dm 644 "$HERE/share/zwift-linux.svg" "$DATA/zwift-linux.svg" && icon="$DATA/zwift-linux.svg"
-cat > "$APPS/zwift-linux.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Zwift
-Comment=Zwift (Windows version via GE-Proton) with Bluetooth and ANT+ trainers
-Exec=$BIN/zwift
-Icon=$icon
-Terminal=false
-Categories=Game;Sports;
-StartupWMClass=zwiftapp.exe
-EOF
-command -v update-desktop-database >/dev/null && update-desktop-database "$APPS" 2>/dev/null || true
-ok "installed: zwift (in $BIN), 'Zwift' in your app menu"
 
-echo
-printf '%sZwift is ready.%s\n' "$c_ok" "$c_off"
-echo "  Start it:        zwift            (or 'Zwift' in your app menu)"
-echo "  Check hardware:  zwift doctor"
-echo "  Uninstall:       $HERE/uninstall.sh"
-case ":$PATH:" in *":$BIN:"*) ;; *) echo "  Note: $BIN is not on your PATH; use $BIN/zwift or add it to PATH." ;; esac
-[ -d "$HOME/.cache/ge-proton-ble" ] && echo "  Tip: the old Bluetooth patch build cache is no longer needed: rm -rf ~/.cache/ge-proton-ble (about 1.5 GB)"
-if [ ${#manual[@]} -gt 0 ]; then
-  echo
-  warn "run these yourself to finish the system setup:"
-  for m in "${manual[@]}"; do echo "    $m"; done
+# ----------------------------------------------------------------------------- 2/6 GE-Proton
+say "2/6 Installing GE-Proton compatibility tool ($GE_ZWIFT)"
+mkdir -p "$COMPAT_DIR"
+if [ ! -f "$GE_DIR/files/lib/wine/x86_64-unix/wine/boot" ] && [ ! -f "$GE_DIR/proton" ]; then
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    say "   downloading $GE_VERSION (~560 MB) ..."
+    curl -fL --retry 3 -o "$tmp/ge.tar.gz" "$GE_RELEASE_URL/$GE_VERSION/$GE_VERSION-x86_64.tar.gz" \
+        || die "GE-Proton download failed"
+    curl -fsSL --retry 3 -o "$tmp/ge.sha512sum" "$GE_RELEASE_URL/$GE_VERSION/$GE_VERSION-x86_64.sha512sum" \
+        || warn "could not download checksum file - skipping verification"
+    if [ -s "$tmp/ge.sha512sum" ]; then
+        (cd "$tmp" && sha512sum -c --quiet ge.sha512sum) || die "GE-Proton download failed its checksum"
+        say "   checksum OK"
+    fi
+    tar -xzf "$tmp/ge.tar.gz" -C "$tmp"
+    [ -d "$tmp/$GE_VERSION" ] || die "unexpected tarball layout"
+    rm -rf "$GE_DIR"
+    mv "$tmp/$GE_VERSION" "$GE_DIR"
+    # Give the tool its own name so this patched copy is listed and used only for Zwift.
+    sed -i "s/$GE_VERSION/$GE_ZWIFT/g" "$GE_DIR/compatibilitytool.vdf"
+    say "   extracted to $GE_DIR"
+else
+    say "   already present: $GE_DIR"
 fi
+
+# ANT+ support: Zwift talks to ANT+ sticks through libusb0.dll; the bridge maps that to Linux usbfs.
+say "   installing ANT+ libusb0 bridge into the compat tool"
+(cd "$HERE/ant-libusb" && sha256sum -c --quiet SHA256SUMS) \
+    || die "ant-libusb binaries don't match ant-libusb/SHA256SUMS"
+install -m 644 "$HERE/ant-libusb/build/x86_64-windows/libusb0.dll" "$GE_DIR/files/lib/wine/x86_64-windows/libusb0.dll"
+install -m 755 "$HERE/ant-libusb/build/x86_64-unix/libusb0.so"     "$GE_DIR/files/lib/wine/x86_64-unix/libusb0.so"
+
+# Heart-rate notify retry: built against GE-Proton 11-8, applied only when the winebth build matches.
+WINEBTH="$GE_DIR/files/lib/wine/x86_64-unix/winebth.so"
+if [ "$DO_BLE" = 1 ] && [ -f "$HERE/wine-patches/winebth.so" ] && [ -f "$WINEBTH" ]; then
+    (cd "$HERE/wine-patches" && sha256sum -c --quiet SHA256SUMS) || die "wine-patches/winebth.so doesn't match wine-patches/SHA256SUMS"
+    have="$(sha256sum "$WINEBTH" | cut -d' ' -f1)"
+    WINEBTH_11_8_SHA="54e85a75a9ed092a548a97204dc2f0a99bb5c7a48ce5a3f9b503887b84c4a3f2"
+    if [ "$have" = "$WINEBTH_11_8_SHA" ]; then
+        cp -n "$WINEBTH" "$WINEBTH.orig"
+        install -m 755 "$HERE/wine-patches/winebth.so" "$WINEBTH"
+        say "   winebth heart-rate retry patch applied"
+    else
+        warn "winebth.so is not the GE-Proton 11-8 build (GE $GE_VERSION) - skipping the HR-retry patch; BLE still works via built-in fixes"
+    fi
+fi
+
+# ----------------------------------------------------------------------------- 3/6 system bits
+say "3/6 System setup"
+UDEV_RULE='SUBSYSTEM=="usb", ATTRS{idVendor}=="0fcf", ATTRS{idProduct}=="1008|1009", MODE="0666", TAG+="uaccess"'
+if [ "$DO_ANT" = 1 ] && [ "$AS_ROOT" = 1 ]; then
+    echo "$UDEV_RULE" > /etc/udev/rules.d/51-zwift-ant-usb.rules
+    udevadm control --reload-rules || true
+    udevadm trigger --subsystem-match=usb --attr-match=idVendor=0fcf || true
+    say "   ANT+ udev rule installed"
+elif [ "$DO_ANT" = 1 ]; then
+    warn "not root: create /etc/udev/rules.d/51-zwift-ant-usb.rules manually if you use an ANT+ stick:"
+    warn "  $UDEV_RULE"
+fi
+BT_RULE='ACTION=="bind", SUBSYSTEM=="usb", DRIVER=="btusb", RUN+="/bin/sh -c '"'"'echo on > /sys%p/../power/control'"'"'"'
+if [ "$DO_BLE" = 1 ] && [ "$AS_ROOT" = 1 ]; then
+    echo "$BT_RULE" > /etc/udev/rules.d/52-zwift-bluetooth-awake.rules
+    for d in /sys/class/bluetooth/hci*/device/..; do
+        [ -f "$d/power/control" ] && echo on > "$d/power/control" || true
+    done
+    say "   Bluetooth USB power saving disabled"
+fi
+
+# ----------------------------------------------------------------------------- Zluggish offline support
+# Preferred mechanism: LD_PRELOAD DNS shim. It rewrites the four zwift.com hostnames to the offline
+# server inside the game's wine process, before DNS is consulted — no host file is touched, and the
+# app keeps its hostname string (TLS SNI / HTTP Host header intact, so the server's cert is valid).
+# The server certificate is appended to the game's own data/cacert.pem (Zwift uses libcurl with its
+# bundled store), so no system trust store change is needed either.
+# Fallback: a sudoers-whitelisted /etc/hosts helper (setup-system.sh), for setups where the shim
+# does not intercept (older runtimes, non-glibc resolvers).
+ZLUGGISH_DIR=/etc/zwift-steamos
+append_server_cert() {
+    local cacert="$GAME_DIR/data/cacert.pem"
+    local mark
+    [ -f "$DATA/zwift-server.pem" ] || return 0
+    if [ ! -f "$cacert" ]; then
+        warn "game's data/cacert.pem not found - the certificate will be appended on first launch"
+        return 0
+    fi
+    mark=$(sed -n '2p' "$DATA/zwift-server.pem")
+    if [ -n "$mark" ] && ! grep -qF "$mark" "$cacert"; then
+        cat "$DATA/zwift-server.pem" >> "$cacert"
+        say "   server certificate appended to the game's data/cacert.pem"
+    fi
+}
+if [ -n "$ZLUGGISH_CERT" ] || [ -n "$ZLUGGISH_HOST" ]; then
+    say "   preparing Zluggish offline support (DNS shim - no host changes needed)"
+    if [ -f "$HERE/share/zwift-dns-shim.so" ]; then
+        install -m 755 "$HERE/share/zwift-dns-shim.so" "$BIN_DIR/zwift-dns-shim.so"
+    elif command -v cc >/dev/null 2>&1 && \
+        cc -shared -fPIC -O2 -Wall -o "$BIN_DIR/zwift-dns-shim.so" "$HERE/share/zwift-dns-shim.c" -ldl 2>/dev/null; then
+        say "   DNS shim compiled for this system"
+    else
+        warn "no prebuilt shim and no compiler: offline mode will use the hosts helper (needs setup-system.sh)"
+    fi
+    if [ -n "$ZLUGGISH_CERT" ]; then
+        install -m 644 "$ZLUGGISH_CERT" "$DATA/zwift-server.pem"
+        append_server_cert
+    else
+        warn "no --zluggish-cert given: traffic redirect works, but HTTPS to the server will fail without its certificate"
+    fi
+    if [ -n "$ZLUGGISH_HOST" ]; then
+        grep -q "ZWIFT_OFFLINE_DEFAULT=" "$CONF" || echo "ZWIFT_OFFLINE_DEFAULT=\"$ZLUGGISH_HOST\"" >> "$CONF"
+    fi
+    # Fallback helper: root installs it system-wide; flatpak stages it for setup-system.sh.
+    if [ "$AS_ROOT" = 1 ]; then
+        install -d -m 755 "$ZLUGGISH_DIR"
+        install -m 755 "$HERE/share/zluggish-hosts.sh" "$ZLUGGISH_DIR/zluggish-hosts"
+        if [ -n "$ZLUGGISH_CERT" ]; then
+            install -m 644 "$ZLUGGISH_CERT" "$ZLUGGISH_DIR/zwift-server.pem"
+            "$ZLUGGISH_DIR/zluggish-hosts" trust "$ZLUGGISH_DIR/zwift-server.pem" 2>/dev/null || true
+        fi
+        cat > /etc/sudoers.d/zwift-steamos-zluggish <<EOF
+# zwift-steamos: allow the pre-launch wrapper to toggle Zluggish hosts entries (fallback)
+$TARGET_USER ALL=(root) NOPASSWD: $ZLUGGISH_DIR/zluggish-hosts add *, $ZLUGGISH_DIR/zluggish-hosts remove, $ZLUGGISH_DIR/zluggish-hosts status
+EOF
+        chmod 0440 /etc/sudoers.d/zwift-steamos-zluggish
+        "$HERE/share/system-setup.sh" whitelist
+    elif [ ! -f "$BIN_DIR/zwift-dns-shim.so" ]; then
+        install -m 755 "$HERE/share/zluggish-hosts.sh" "$BIN_DIR/zluggish-hosts"
+    fi
+fi
+# Flatpak mode: emit the one-shot sudo script for the root-level bits that cannot be avoided —
+# the ANT+ udev rules always; hosts-helper fallback + system trust anchor when Zluggish is set up.
+if [ -n "${ZWIFT_FLATPAK:-}" ]; then
+    ZLUGGISH_HOST="${ZLUGGISH_HOST:-}" \
+    ZLUGGISH_CERT_PATH="$([ -f "$DATA/zwift-server.pem" ] && echo "$DATA/zwift-server.pem" || true)" \
+    ZWIFT_TARGET_USER="$TARGET_USER" \
+    PAYLOAD_HELPER="$([ -f "$BIN_DIR/zluggish-hosts" ] && echo "$BIN_DIR/zluggish-hosts" || true)" \
+        bash "$HERE/share/system-setup.sh" generate "$DATA/bin/setup-system.sh" \
+        || warn "could not generate setup-system.sh"
+    say "   one-time root step (ANT+ udev rules):  sudo bash $DATA/bin/setup-system.sh"
+fi
+
+# ----------------------------------------------------------------------------- 4/6 Steam integration
+say "4/6 Registering Steam shortcuts"
+if [ "$MAKE_SHORTCUT" = 1 ]; then
+    if [ -z "${ZWIFT_FLATPAK:-}" ] && pgrep -u "$TARGET_USER" -x steam >/dev/null 2>&1; then
+        warn "Steam is running - it must be restarted to pick up the shortcut (use --restart-steam)"
+    fi
+    LAUNCH_BASE="ZWIFT_STEAMOS_DATA=$DATA $BIN_DIR/steam-prelaunch %command%"
+    $SUDO python3 "$HERE/share/steam-integration.py" \
+        --exe "$GAME_DIR/LinuxZwiftLauncher.exe" --app-name "Zwift" \
+        --startdir "$GAME_DIR" --icon "$ICON" \
+        --compat-tool "$GE_ZWIFT" --launch-options "$LAUNCH_BASE"
+    if [ -n "$ZLUGGISH_HOST" ]; then
+        LAUNCH_ZLUG="ZWIFT_STEAMOS_DATA=$DATA ZWIFT_OFFLINE_HOST=$ZLUGGISH_HOST $BIN_DIR/steam-prelaunch %command%"
+        $SUDO python3 "$HERE/share/steam-integration.py" \
+            --exe "$GAME_DIR/LinuxZwiftLauncher.exe" --app-name "Zwift (Zluggish)" \
+            --startdir "$GAME_DIR" --icon "$ICON" \
+            --compat-tool "$GE_ZWIFT" --launch-options "$LAUNCH_ZLUG" \
+            --description "Zwift via Zluggish offline server"
+    fi
+else
+    warn "--no-shortcut: add the game manually in Steam (Exe: $GAME_DIR/LinuxZwiftLauncher.exe, StartDir: $GAME_DIR)"
+fi
+APPID_ONLINE="$($SUDO python3 -c "import binascii,sys; exe=sys.argv[1]; print((binascii.crc32(exe.encode()+'Zwift'.encode()) & 0xFFFFFFFF) | 0x80000000)" "$GAME_DIR/LinuxZwiftLauncher.exe")"
+grep -q '^APPID=' "$CONF" || echo "APPID=\"$APPID_ONLINE\"" >> "$CONF"
+
+# ----------------------------------------------------------------------------- 5/6 game files
+say "5/6 Downloading/verifying the game files (~5 GB) into $GAME_DIR"
+( cd "$DATA" && $SUDO python3 zwift-fetch-game.py "$GAME_DIR" ) || die "game download failed - run it again: zwift update"
+# launcher version file (LAUNCHER_VERSION fallback in the pre-launch wrapper)
+curl -fsSL -o "$GAME_DIR/ZwiftLauncher_ver_cur.xml" "https://cdn.zwift.com/gameassets/Zwift_Updates_Root/ZwiftLauncher_ver_cur.xml" 2>/dev/null \
+    || warn "could not fetch ZwiftLauncher_ver_cur.xml (using built-in launcher version)"
+
+# ----------------------------------------------------------------------------- 6/6 ownership + restart
+if [ "$AS_ROOT" = 1 ]; then
+    say "6/6 Fixing ownership for $TARGET_USER"
+    chown -R "$TARGET_USER:$TARGET_USER" "$DATA" "$COMPAT_DIR/$GE_ZWIFT" "$TARGET_HOME/.local/bin/zwift" 2>/dev/null || true
+fi
+if [ "$RESTART_STEAM" = 1 ]; then
+    if [ -n "${ZWIFT_FLATPAK:-}" ]; then
+        warn "flatpak mode: restart Steam manually (or just reopen the library) to pick up the shortcut"
+    else
+        say "Restarting Steam to pick up the shortcut"
+        if [ "$AS_ROOT" = 1 ]; then
+            pkill -TERM -u "$TARGET_USER" -x steam 2>/dev/null || true
+        else
+            steam -shutdown 2>/dev/null || pkill -TERM -x steam 2>/dev/null || true
+        fi
+        say "Steam is restarting (on SteamOS the session brings it back automatically)"
+    fi
+fi
+
+say "Done."
+say "  1. Sign in once:        zwift login        (as $TARGET_USER, Desktop Mode recommended)"
+say "  2. Start Zwift:         Steam library -> Zwift"
+say "  Offline/Zluggish:       Steam library -> 'Zwift (Zluggish)'  (or: zwift zluggish on <ip>)"
+say "  Status / diagnostics:   zwift status | zwift doctor"

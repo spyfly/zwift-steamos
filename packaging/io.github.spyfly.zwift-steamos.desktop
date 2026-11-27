@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=zwift-steamos
+GenericName=Zwift installer for SteamOS
+Comment=Install/maintain Zwift for the native Steam UI (run: flatpak run io.github.spyfly.zwift-steamos install)
+Exec=flatpak run io.github.spyfly.zwift-steamos
+Icon=io.github.spyfly.zwift-steamos
+Terminal=true
+Categories=Game;Utility;
+NoDisplay=false

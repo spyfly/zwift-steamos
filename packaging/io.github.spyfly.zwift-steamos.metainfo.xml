@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="console-application">
+  <id>io.github.spyfly.zwift-steamos</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>zwift-steamos</name>
+  <summary>Zwift from the Steam UI on SteamOS</summary>
+  <description>
+    <p>
+      Installs and maintains the Windows Zwift app so it starts from the native Steam UI on
+      SteamOS (Steam Machine, Steam Deck, HTPC): GE-Proton as a Steam compatibility tool, the
+      wine prefix owned by Steam, ANT+ through the included libusb0 bridge and Bluetooth LE
+      through GE-Proton's winebth driver. Launches are wrapped by a pre-launch script that
+      refreshes the sign-in token, checks for game updates and (optionally) toggles Zluggish
+      offline servers via ZWIFT_OFFLINE_HOST=<server ip>.
+    </p>
+    <p>
+      The package is the installer and control plane; Wine itself runs natively under Steam,
+      not inside the flatpak sandbox. One optional sudo step (setup-system.sh) enables ANT+
+      sticks and Zluggish offline mode.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.spyfly.zwift-steamos.desktop</launchable>
+  <url type="homepage">https://github.com/spyfly/zwift-steamos</url>
+  <url type="bugtracker">https://github.com/spyfly/zwift-steamos/issues</url>
+  <developer_name>spyfly</developer_name>
+  <categories>
+    <category>Game</category>
+    <category>Utility</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="1.0.0" date="2026-11-27">
+      <description>
+        <p>First SteamOS-native release: Steam shortcut + GE-Proton11-14 compat tool, no
+        umu-launcher, Zluggish offline mode via launch env, flatpak installer.</p>
+      </description>
+    </release>
+  </releases>
+</component>

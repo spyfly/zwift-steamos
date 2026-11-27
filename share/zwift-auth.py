@@ -21,7 +21,8 @@ import json, os, sys, time, urllib.error, urllib.parse, urllib.request, webbrows
 GAME_URL = os.environ.get("ZWIFT_GAME_URL", "https://us-or-rly101.zwift.com")
 CLIENT_ID = "Game_Launcher"
 REDIRECT = "http://zwift/"
-DATA = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "zwift-linux")
+DATA = os.environ.get("ZWIFT_STEAMOS_DATA") or os.path.join(
+    os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "zwift-steamos")
 STORE = os.path.join(DATA, "auth.json")
 UA = "zwift-linux/1.1.0"
 

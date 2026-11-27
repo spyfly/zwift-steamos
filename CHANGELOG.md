@@ -1,5 +1,30 @@
 # Changelog
 
+## 27 November 2026 — zwift-steamos 1.0.0 (SteamOS-native fork)
+
+- **Steam-native runtime, no umu-launcher.** GE-Proton (default: 11-14) installs into Steam's
+  `compatibilitytools.d` as `GE-Proton<ver>-zwift` and is bound to the shortcut through Steam's
+  `CompatToolMapping`; Steam owns the wine prefix (`compatdata/<appid>/pfx`). `steam-prelaunch`
+  runs in the launch options before `%command%` (offline toggle, BLE preflight, update check,
+  token refresh, prefs) and hands over to Proton — the game starts from the Steam UI.
+- **Flatpak packaging** (`packaging/`): `io.github.spyfly.zwift-steamos` as a single-file bundle.
+  The flatpak is the installer/control plane (install, update, login, doctor, uninstall); Wine and
+  the game run natively under Steam, not in the sandbox. Grants: `xdg-data/zwift-steamos` and
+  `xdg-data/Steam` (create) + network. Flatpak apps cannot escalate to root, so the few root-level
+  bits are one optional `sudo bash ~/.local/share/zwift-steamos/bin/setup-system.sh` (udev rules,
+  sudoers, trust anchor).
+- **Zluggish offline mode built in, root-free:** launch env `ZWIFT_OFFLINE_HOST=<ip>` (per launch
+  or via the separate "Zwift (Zluggish)" library entry) redirects the four client domains through
+  an `LD_PRELOAD` getaddrinfo shim that runs inside the game's wine process — no `/etc/hosts`, no
+  sudoers rule, no system trust store. The server certificate is appended to the game's own
+  `data/cacert.pem` (libcurl uses the bundled store) and re-appended after game updates. A
+  sudoers-whitelisted hosts helper (`setup-system.sh`) remains as fallback; in flatpak installs it
+  is also the one-time sudo step for the ANT+ udev rules.
+- **SteamOS persistence:** `setup-system.sh` whitelists its files in `/etc/atomic-update.conf.d`
+  so they survive SteamOS updates (3.6+ keeps only whitelisted `/etc` changes).
+- Everything else carries over from upstream zwift-linux (BLE fixes, ANT+ bridge, launcher-free
+  sign-in).
+
 ## 10 November 2026
 
 - **Bluetooth heart-rate sensors that connect but show "no signal" are fixed.** With a Garmin

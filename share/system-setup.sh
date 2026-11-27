@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# system-setup.sh — the root-level bits of zwift-steamos.
+#
+# Everything else in zwift-steamos is user-writable; only these need root:
+#   - /etc/udev/rules.d/51-zwift-ant-usb.rules        ANT+ stick access (0fcf:1008/1009)
+#   - /etc/udev/rules.d/52-zwift-bluetooth-awake.rules USB power saving off for the BT adapter
+#   - /etc/zwift-steamos/zluggish-hosts               root-owned offline toggle helper (+ sudoers rule)
+#   - trust anchor for the Zluggish server certificate
+#   - /etc/atomic-update.conf.d entries so the files survive SteamOS updates
+#
+# Usage:
+#   system-setup.sh                    apply now (needs root; env: ZWIFT_TARGET_USER,
+#                                      ZLUGGISH_CERT_PATH, ZLUGGISH_HOST, PAYLOAD_HELPER)
+#   system-setup.sh whitelist          only refresh the SteamOS /etc persistence whitelist
+#   system-setup.sh generate OUT.sh    write a self-contained script that applies everything
+#                                      when run as root on the host
+#   system-setup.sh remove             remove the root-level bits again
+set -u
+
+UDEV_DIR=/etc/udev/rules.d
+ZLUGGISH_DIR=/etc/zwift-steamos
+ANCHOR_DIR=/etc/ca-certificates/trust-source/anchors
+WHITELIST=/etc/atomic-update.conf.d/zwift-steamos.conf
+
+ANT_RULE='SUBSYSTEM=="usb", ATTRS{idVendor}=="0fcf", ATTRS{idProduct}=="1008|1009", MODE="0666", TAG+="uaccess"'
+BT_RULE='ACTION=="bind", SUBSYSTEM=="usb", DRIVER=="btusb", RUN+="/bin/sh -c '"'"'echo on > /sys%p/../power/control'"'"'"'
+
+MANAGED_ETC="$UDEV_DIR/51-zwift-ant-usb.rules $UDEV_DIR/52-zwift-bluetooth-awake.rules \
+$ZLUGGISH_DIR $ZLUGGISH_DIR/zluggish-hosts $ZLUGGISH_DIR/zwift-server.pem \
+/etc/sudoers.d/zwift-steamos-zluggish \
+$ANCHOR_DIR/zwift-steamos-zluggish.crt \
+/etc/ssl/certs /var/lib/ca-certificates"
+
+say()  { printf '\033[1;32m==\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m!!\033[0m %s\n' "$*"; }
+
+whitelist_etc() {
+    # SteamOS keeps only whitelisted /etc changes across OS updates (3.6+).
+    mkdir -p /etc/atomic-update.conf.d
+    # shellcheck disable=SC2086
+    printf '%s\n' "zwift-steamos" "# Files kept across SteamOS updates:" \
+        $(printf '%s\n' $MANAGED_ETC | sed 's/^/  /') > "$WHITELIST.tmp" 2>/dev/null || true
+    # The actual format: one file per line (absolute path), comments with #.
+    {
+        echo "# zwift-steamos — files to keep across SteamOS updates"
+        for f in $MANAGED_ETC; do echo "$f"; done
+    } > "$WHITELIST"
+    say "wrote $WHITELIST"
+}
+
+apply() {
+    [ "$(id -u)" = 0 ] || { warn "needs root: sudo bash $0 $*"; exit 1; }
+    TARGET_USER="${ZWIFT_TARGET_USER:-${SUDO_USER:-}}"
+    [ -n "$TARGET_USER" ] || { warn "set ZWIFT_TARGET_USER (the Steam user, e.g. deck)"; exit 1; }
+
+    # udev rules
+    echo "$ANT_RULE" > "$UDEV_DIR/51-zwift-ant-usb.rules"
+    echo "$BT_RULE"  > "$UDEV_DIR/52-zwift-bluetooth-awake.rules"
+    udevadm control --reload-rules || true
+    udevadm trigger --subsystem-match=usb --attr-match=idVendor=0fcf || true
+    say "udev rules installed (ANT+ access, Bluetooth power saving off)"
+
+    # Zluggish helper (root-owned copy) + sudoers
+    if [ -n "${PAYLOAD_HELPER:-}" ] && [ -f "$PAYLOAD_HELPER" ]; then
+        install -d -m 755 "$ZLUGGISH_DIR"
+        install -m 755 "$PAYLOAD_HELPER" "$ZLUGGISH_DIR/zluggish-hosts"
+        if [ -n "${ZLUGGISH_CERT_PATH:-}" ] && [ -f "$ZLUGGISH_CERT_PATH" ]; then
+            install -m 644 "$ZLUGGISH_CERT_PATH" "$ZLUGGISH_DIR/zwift-server.pem"
+            "$ZLUGGISH_DIR/zluggish-hosts" trust "$ZLUGGISH_DIR/zwift-server.pem"
+        fi
+        cat > /etc/sudoers.d/zwift-steamos-zluggish <<EOF
+# zwift-steamos: allow the pre-launch wrapper to toggle Zluggish hosts entries
+$TARGET_USER ALL=(root) NOPASSWD: $ZLUGGISH_DIR/zluggish-hosts add *, $ZLUGGISH_DIR/zluggish-hosts remove, $ZLUGGISH_DIR/zluggish-hosts status
+EOF
+        chmod 0440 /etc/sudoers.d/zwift-steamos-zluggish
+        if [ -n "${ZLUGGISH_HOST:-}" ]; then
+            "$ZLUGGISH_DIR/zluggish-hosts" add "$ZLUGGISH_HOST"
+        fi
+        say "Zluggish helper + sudoers rule + trust anchor installed"
+    fi
+
+    # Bluetooth service + USB power saving for already-bound adapters
+    command -v systemctl >/dev/null 2>&1 && systemctl enable --now bluetooth 2>/dev/null || true
+    for d in /sys/class/bluetooth/hci*/device/..; do
+        [ -f "$d/power/control" ] && echo on > "$d/power/control" 2>/dev/null || true
+    done
+
+    whitelist_etc
+    say "System setup complete."
+}
+
+remove() {
+    [ "$(id -u)" = 0 ] || { warn "needs root"; exit 1; }
+    rm -f "$UDEV_DIR/51-zwift-ant-usb.rules" "$UDEV_DIR/52-zwift-bluetooth-awake.rules" \
+          /etc/sudoers.d/zwift-steamos-zluggish "$ANCHOR_DIR/zwift-steamos-zluggish.crt" "$WHITELIST"
+    rm -rf "$ZLUGGISH_DIR"
+    udevadm control --reload-rules 2>/dev/null || true
+    command -v update-ca-trust >/dev/null 2>&1 && update-ca-trust extract
+    say "removed"
+}
+
+generate() {
+    local out="$1"
+    cat > "$out" <<EOF
+#!/usr/bin/env bash
+# Generated by zwift-steamos — the root-level bits (udev, sudoers, trust anchor, persistence).
+# Run once:  sudo bash $out
+set -u
+ZWIFT_TARGET_USER='${ZWIFT_TARGET_USER:-}'
+PAYLOAD_HELPER='${PAYLOAD_HELPER:-}'
+ZLUGGISH_CERT_PATH='${ZLUGGISH_CERT_PATH:-}'
+ZLUGGISH_HOST='${ZLUGGISH_HOST:-}'
+GENERATOR='${GENERATOR_PATH:-}'
+if [ -n "\$GENERATOR" ] && [ -f "\$GENERATOR" ]; then
+    exec sudo -E ZWIFT_TARGET_USER="\$ZWIFT_TARGET_USER" PAYLOAD_HELPER="\$PAYLOAD_HELPER" \
+        ZLUGGISH_CERT_PATH="\$ZLUGGISH_CERT_PATH" ZLUGGISH_HOST="\$ZLUGGISH_HOST" \
+        bash "\$GENERATOR"
+fi
+echo "generator script missing (\$GENERATOR)"; exit 1
+EOF
+    chmod +x "$out"
+    say "wrote $out"
+}
+
+case "${1:-apply}" in
+    apply) apply "$@" ;;
+    whitelist) [ "$(id -u)" = 0 ] || { warn "needs root"; exit 1; }; whitelist_etc ;;
+    generate)
+        GENERATOR_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/system-setup.sh"
+        export GENERATOR_PATH
+        generate "$2" ;;
+    remove) remove ;;
+    *) echo "usage: $0 [apply|whitelist|generate OUT.sh|remove]" >&2; exit 1 ;;
+esac

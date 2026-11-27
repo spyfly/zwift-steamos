@@ -1,0 +1,27 @@
+{
+    "id": "io.github.spyfly.zwift-steamos",
+    "runtime": "org.freedesktop.Platform",
+    "runtime-version": "24.08",
+    "sdk": "org.freedesktop.Sdk",
+    "command": "zwift-steamos",
+    "finish-args": [
+        "--share=network",
+        "--filesystem=xdg-data/zwift-steamos:create",
+        "--filesystem=xdg-data/Steam:create"
+    ],
+    "modules": [
+        {
+            "name": "zwift-steamos",
+            "buildsystem": "simple",
+            "build-commands": [
+                "install -Dm755 packaging/zwift-steamos.sh /app/bin/zwift-steamos",
+                "cc -shared -fPIC -O2 -Wall -o share/zwift-dns-shim.so share/zwift-dns-shim.c -ldl",
+                "mkdir -p /app/share/zwift-steamos",
+                "cp -r share zwift-start ant-libusb wine-patches install.sh uninstall.sh /app/share/zwift-steamos/",
+                "install -Dm644 packaging/io.github.spyfly.zwift-steamos.metainfo.xml /app/share/metainfo/io.github.spyfly.zwift-steamos.metainfo.xml",
+                "install -Dm644 packaging/io.github.spyfly.zwift-steamos.desktop /app/share/applications/io.github.spyfly.zwift-steamos.desktop",
+                "install -Dm644 share/icons/hicolor/256x256/apps/io.github.spyfly.zwift-steamos.png /app/share/icons/hicolor/256x256/apps/io.github.spyfly.zwift-steamos.png"
+            ]
+        }
+    ]
+}
