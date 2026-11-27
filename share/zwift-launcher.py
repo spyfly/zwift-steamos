@@ -225,12 +225,42 @@ def ask_code_chromium(url, timeout=None):
                   "--ozone-platform-hint=auto",
                   "--disable-features=Translate,RendererCodeIntegrity",
                   "--disable-breakpad"]
-    proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                            text=True, errors="replace", env=_clean_env())
     code = None
     error = None
+
+    def _kill_tree():
+        # chromium runs under the flatpak's bwrap: killing the wrapper alone orphans
+        # the browser. Signal the whole process group instead.
+        try:
+            os.killpg(os.getpgid(proc.pid), 15)
+        except (ProcessLookupError, PermissionError):
+            pass
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(proc.pid), 9)
+            except (ProcessLookupError, PermissionError):
+                pass
+
     try:
-        port, _ws_url = _devtools_port(proc)
+        port = None
+        for attempt in range(2):  # 2nd try: a leftover instance hands off and exits 0
+            proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                    text=True, errors="replace", env=_clean_env(),
+                                    start_new_session=True)
+            try:
+                port, _ws_url = _devtools_port(proc)
+                break
+            except RuntimeError as e:
+                _kill_tree()
+                if "rc=0" not in str(e) or attempt:
+                    raise
+                # a leftover chromium with this profile took the URL and exited -
+                # clear the stale instance and start fresh once.
+                subprocess.run(["pkill", "-f", "user-data-dir=" + profile],
+                               timeout=10, check=False)
+                time.sleep(2)
         target = _page_target(port)
         sock = _ws_connect(target)
         global WS
@@ -271,12 +301,7 @@ def ask_code_chromium(url, timeout=None):
     except Exception as e:  # noqa: BLE001 - best effort launcher, caller falls back
         print(f"zwift-launcher: {e}", file=sys.stderr)
     finally:
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+        _kill_tree()
     if error:
         sys.exit(f"zwift-auth: sign-in failed: {error}")
     return code
