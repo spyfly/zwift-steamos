@@ -196,11 +196,28 @@ def _clean_env():
     return env
 
 
+def _seed_chromium_prefs():
+    # org.chromium.Chromium's wrapper runs unlink_profiles.py before the browser: it
+    # scans $XDG_CONFIG_HOME/chromium/Default and exits 1 when Preferences is missing,
+    # which kills chromium on a virgin system. Seed a minimal file so the wrapper passes.
+    cfg = os.path.expanduser("~/.var/app/org.chromium.Chromium/config/chromium/Default")
+    try:
+        os.makedirs(cfg, exist_ok=True)
+        p = os.path.join(cfg, "Preferences")
+        if not os.path.exists(p):
+            with open(p, "w") as f:
+                f.write("{}")
+    except OSError:
+        pass
+
+
 def ask_code_chromium(url, timeout=None):
     """Open the sign-in page in a Chromium app window; return the ?code= of the
     http://zwift/ redirect, or None if the user cancelled/it timed out."""
     cmd = _chromium_cmd()
     profile = _profile_dir()
+    _seed_chromium_prefs()
+    os.makedirs(profile, exist_ok=True)
     timeout = timeout or float(os.environ.get("ZWIFT_AUTH_TIMEOUT", "600"))
     args = cmd + ["--app=" + url, "--user-data-dir=" + profile,
                   "--remote-debugging-port=0", "--no-first-run",
