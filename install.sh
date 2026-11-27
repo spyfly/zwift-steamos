@@ -170,9 +170,11 @@ if [ ! -f "$GE_DIR/files/lib/wine/x86_64-unix/wine/boot" ] && [ ! -f "$GE_DIR/pr
         say "   checksum OK"
     fi
     tar -xzf "$tmp/$GE_VERSION-x86_64.tar.gz" -C "$tmp"
-    [ -d "$tmp/$GE_VERSION" ] || die "unexpected tarball layout"
+    src="$tmp/$GE_VERSION"
+    [ -d "$src" ] || src="$tmp/$GE_VERSION-x86_64"   # newer GE tarballs carry the -x86_64 suffix
+    [ -d "$src" ] || die "unexpected tarball layout"
     rm -rf "$GE_DIR"
-    mv "$tmp/$GE_VERSION" "$GE_DIR"
+    mv "$src" "$GE_DIR"
     # Give the tool its own name so this patched copy is listed and used only for Zwift.
     sed -i "s/$GE_VERSION/$GE_ZWIFT/g" "$GE_DIR/compatibilitytool.vdf"
     say "   extracted to $GE_DIR"
