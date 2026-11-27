@@ -99,9 +99,11 @@ def update_shortcuts(path, appid_s, fields):
         if all(str(old.get(field, "")) == str(val) for field, val in entry.items()):
             return "unchanged"
         root[existing_key] = entry
+        save_shortcuts(path, data)
         return "updated"
     # VDF dicts in shortcuts.vdf use sequential string keys ("0", "1", ...)
     root[str(len(root))] = entry
+    save_shortcuts(path, data)
     return "added"
 
 
